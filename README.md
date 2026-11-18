@@ -16,6 +16,8 @@ A standalone Windows app for reconnecting to your current Hearthstone match with
 
 Requires Windows 10 (1803+) or Windows 11, x64. The app detects Hearthstone automatically and lets you customize the global hotkey and the overlay.
 
+**Compatibility with gaming accelerators.** HS-Reconnector may be unable to reconnect if a ping reducer or gaming accelerator redirects Hearthstone traffic through a proxy. HS-Reconnector needs to find the match-server TCP connection owned by Hearthstone. If reconnecting fails, try excluding Hearthstone from the accelerator or temporarily turning the accelerator off.
+
 ## Ping & Region
 
 The optional in-game overlay shows match-server latency and region. Enable it under **Ping & Region**. See [how it works and how to configure it](PING.md).
