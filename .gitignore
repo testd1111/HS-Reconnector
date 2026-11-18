@@ -1,0 +1,12 @@
+.vs/
+artifacts/
+artifacts_for_all/
+bin/
+obj/
+TestResults/
+*.user
+*.suo
+*.cache
+*.pdb
+*.log
+*.tmp
