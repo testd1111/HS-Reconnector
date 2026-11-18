@@ -45,11 +45,13 @@ namespace HS_Reconnector.Core
         private readonly DispatcherTimer connectionRestoreTimer;
         private readonly DispatcherTimer cooldownTimer;
         private readonly object endpointLock = new object();
+        private readonly bool isElevated = Win32.IsElevated();
 
         private LogWatcher logWatcher;
         private bool hasRunningWatcher;
         private bool logWatcherStartInProgress;
         private bool gameRunObserved;
+        private DateTime gameStartedAtUtc;
         private string detectedHsDirectory;
         private string lastCustomHsDirectory;
         private string activeLogPath;
@@ -107,11 +109,12 @@ namespace HS_Reconnector.Core
             cooldownTimer.Tick += CooldownTimer_Tick;
         }
 
-        public void Start()
+        public bool Start()
         {
-            ApplySettings();
+            var hotkeyApplied = ApplySettings();
             monitorTimer.Start();
             TickMonitor();
+            return hotkeyApplied;
         }
 
         public bool ApplySettings()
@@ -159,7 +162,7 @@ namespace HS_Reconnector.Core
             if (disposed)
                 return;
 
-            if (!Win32.IsElevated())
+            if (!isElevated)
             {
                 AppLogger.Error("Reconnect cancelled: Administrator privileges are required.");
                 return;
@@ -213,7 +216,6 @@ namespace HS_Reconnector.Core
         public ControllerSnapshot GetSnapshot()
         {
             GetEndpointState(out var addr, out var port, out var unsupported, out var tcpCount, out _);
-            var isElevated = Win32.IsElevated();
             var onCooldown = IsOnCooldown();
             var cooldownRemaining = onCooldown
                 ? Math.Max(1, (int)Math.Ceiling((cooldownEndsAtUtc - DateTime.UtcNow).TotalSeconds))
@@ -365,10 +367,11 @@ namespace HS_Reconnector.Core
             if (disposed)
                 return;
 
-            var isRunning = HearthstoneLocator.IsHearthstoneRunning();
+            var isRunning = HearthstoneLocator.IsHearthstoneRunning(out var startedAtUtc);
             if (isRunning && !gameRunObserved)
             {
                 gameRunObserved = true;
+                gameStartedAtUtc = startedAtUtc;
                 AppLogger.Info("Hearthstone process detected.");
                 if (reconnector.Status == ConnectionStatus.Disconnected)
                 {
@@ -432,7 +435,7 @@ namespace HS_Reconnector.Core
                 return;
             }
 
-            var logPath = HearthstoneLocator.FindLatestLogFile(hsDir);
+            var logPath = HearthstoneLocator.FindLatestLogFile(hsDir, gameStartedAtUtc);
             if (string.IsNullOrEmpty(logPath))
             {
                 ScheduleNextLogSearch();
@@ -448,7 +451,7 @@ namespace HS_Reconnector.Core
                 ? detectedHsDirectory
                 : HearthstoneLocator.FindHearthstoneDirectory(AppSettings.Instance.CustomHearthstoneDirectory);
 
-            var latestLogPath = HearthstoneLocator.FindLatestLogFile(hsDir);
+            var latestLogPath = HearthstoneLocator.FindLatestLogFile(hsDir, gameStartedAtUtc);
             if (string.IsNullOrEmpty(latestLogPath)
                 || string.Equals(latestLogPath, activeLogPath, StringComparison.OrdinalIgnoreCase)
                 || !IsNewerLogFile(latestLogPath, activeLogPath))

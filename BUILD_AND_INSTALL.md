@@ -7,6 +7,10 @@
 ## Build Release x64
 
 ```powershell
+$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+$msbuild = & $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -find 'MSBuild\Current\Bin\MSBuild.exe' |
+    Select-Object -First 1
+if (-not $msbuild) { throw 'MSBuild was not found.' }
 & $msbuild 'HS-Reconnector.sln' /t:Clean,Build /p:Configuration=Release /p:Platform=x64 /v:minimal
 ```
 

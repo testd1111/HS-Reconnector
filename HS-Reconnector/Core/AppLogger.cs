@@ -12,7 +12,7 @@ namespace HS_Reconnector.Core
         private static readonly List<string> Entries = new List<string>(MaxEntries);
 
         public static bool DisableFileLogging { get; set; }
-        public static event Action<string> EntryAdded;
+        public static event Action EntryAdded;
 
         public static void Info(string message) => Write("INFO", message);
         public static void Warn(string message) => Write("WARN", message);
@@ -40,25 +40,24 @@ namespace HS_Reconnector.Core
                 if (Entries.Count >= MaxEntries)
                     Entries.RemoveAt(0);
                 Entries.Add(line);
+                if (!DisableFileLogging)
+                {
+                    try
+                    {
+                        var logDir = AppSettings.DataDirectory;
+                        Directory.CreateDirectory(logDir);
+                        var logPath = Path.Combine(logDir, "hs-reconnector.log");
+                        TrimIfOversized(logPath);
+                        File.AppendAllText(logPath, line + Environment.NewLine, new UTF8Encoding(false));
+                    }
+                    catch
+                    {
+                        // Logging must never crash the application.
+                    }
+                }
             }
 
-            if (!DisableFileLogging)
-            {
-                try
-                {
-                    var logDir = AppSettings.DataDirectory;
-                    Directory.CreateDirectory(logDir);
-                    var logPath = Path.Combine(logDir, "hs-reconnector.log");
-                    TrimIfOversized(logPath);
-                    File.AppendAllText(logPath, line + Environment.NewLine, new UTF8Encoding(false));
-                }
-                catch
-                {
-                    // Logging must never crash the application.
-                }
-            }
-
-            EntryAdded?.Invoke(line);
+            EntryAdded?.Invoke();
         }
 
         private static void TrimIfOversized(string logPath)

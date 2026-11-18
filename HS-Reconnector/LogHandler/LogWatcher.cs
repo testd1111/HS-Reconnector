@@ -247,18 +247,7 @@ namespace HS_Reconnector.LogHandler
             return lowerBound == 0 ? 0 : length;
         }
 
-        private static bool TryFindLatestEndpoint(
-            Stream stream,
-            long length,
-            ConnectionLogHandler handler,
-            out string host,
-            out ushort port,
-            out bool matchEnded)
-        {
-            return TryFindLatestEndpointWithEvent(stream, length, handler, out host, out port, out matchEnded, out _, out _);
-        }
-
-        private static bool TryFindLatestEndpointWithEvent(
+        internal static bool TryFindLatestEndpointWithEvent(
             Stream stream,
             long length,
             ConnectionLogHandler handler,

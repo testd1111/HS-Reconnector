@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Reflection;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -34,6 +35,7 @@ namespace HS_Reconnector.UI
         private HotkeyModifiers failedModifiers = HotkeyModifiers.None;
         private bool loadingDraft;
         private bool allowExit;
+        private int logRefreshPending;
 
         internal MainWindow(ReconnectController controller, OverlayWindow overlayWindow)
         {
@@ -315,15 +317,15 @@ namespace HS_Reconnector.UI
             LogTextBox.ScrollToEnd();
         }
 
-        private void OnLogEntryAdded(string line)
+        private void OnLogEntryAdded()
         {
+            if (Interlocked.Exchange(ref logRefreshPending, 1) != 0)
+                return;
+
             Dispatcher.BeginInvoke(new Action(() =>
             {
-                LogTextBox.AppendText(line + Environment.NewLine);
-                if (LogTextBox.LineCount > 300)
-                    LoadLogSnapshot();
-                else
-                    LogTextBox.ScrollToEnd();
+                Interlocked.Exchange(ref logRefreshPending, 0);
+                LoadLogSnapshot();
             }));
         }
 
@@ -525,8 +527,8 @@ namespace HS_Reconnector.UI
         private void ResetHotkeyButton_Click(object sender, RoutedEventArgs e)
         {
             ClearHotkeyError();
-            draftHotkey = Key.R;
-            draftModifiers = HotkeyModifiers.Control | HotkeyModifiers.Shift;
+            draftHotkey = AppSettings.DefaultHotkey;
+            draftModifiers = AppSettings.DefaultHotkeyModifiers;
             HotkeyBox.Text = FormatHotkey(draftModifiers, draftHotkey);
         }
 
@@ -545,7 +547,7 @@ namespace HS_Reconnector.UI
             HotkeyBox.Text = Localization.Get("OptHotkeyPrompt");
         }
 
-        private void ShowHotkeyError(HotkeyModifiers modifiers, Key key)
+        internal void ShowHotkeyError(HotkeyModifiers modifiers, Key key)
         {
             failedModifiers = modifiers;
             failedHotkey = key;
@@ -632,7 +634,9 @@ namespace HS_Reconnector.UI
                 text += "Alt+";
             if ((modifiers & HotkeyModifiers.Windows) == HotkeyModifiers.Windows)
                 text += "Win+";
-            return text + key;
+            if (key >= Key.D0 && key <= Key.D9)
+                return text + (key - Key.D0);
+            return text + (key == Key.OemPlus ? "+" : key.ToString());
         }
     }
 }

@@ -12,7 +12,7 @@ A standalone Windows app for reconnecting to your current Hearthstone match with
 
 1. Download and extract the Windows x64 ZIP from [Releases](https://github.com/testd1111/HS-Reconnector/releases/latest).
 2. Run `HS-Reconnector.exe` and approve the administrator prompt. Administrator access is required to reset the active game connection.
-3. During a match, press **Ctrl+Shift+R** or click the overlay button to reconnect.
+3. During a match, press **Ctrl+Alt+F10** or click the overlay button to reconnect.
 
 Requires Windows 10 (1803+) or Windows 11, x64. The app detects Hearthstone automatically and lets you customize the global hotkey and the overlay.
 

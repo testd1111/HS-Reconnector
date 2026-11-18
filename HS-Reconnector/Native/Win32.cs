@@ -22,12 +22,6 @@ namespace HS_Reconnector.Native
         [DllImport("user32.dll", SetLastError = true)]
         public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        public static extern ushort GlobalAddAtom(string value);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern ushort GlobalDeleteAtom(ushort atom);
-
         [DllImport("user32.dll", SetLastError = true)]
         public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
 

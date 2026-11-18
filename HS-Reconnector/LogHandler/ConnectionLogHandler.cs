@@ -11,11 +11,11 @@ namespace HS_Reconnector.LogHandler
 
     internal sealed class ConnectionLogHandler
     {
-        private readonly Regex GotoGameServer = new Regex(
+        private static readonly Regex GotoGameServer = new Regex(
             @"Network\.GotoGameServe(?:r)?\(\).*address=\s*(?<endpoint>[^\s,]+)",
             RegexOptions.Compiled);
 
-        private readonly Regex EndGameDisconnect = new Regex(
+        private static readonly Regex EndGameDisconnect = new Regex(
             @"Network\.DisconnectFromGameServer\(\).*Reason:\s*EndGameScreen",
             RegexOptions.Compiled);
 
@@ -33,11 +33,6 @@ namespace HS_Reconnector.LogHandler
 
             SplitEndpoint(match.Groups["endpoint"].Value.Trim(), out host, out port);
             return !string.IsNullOrEmpty(host);
-        }
-
-        internal bool TryParseEndpoint(string line, out string host, out ushort port)
-        {
-            return TryExtractEndpoint(line, out host, out port) && port != 0;
         }
 
         internal bool IsMatchEndLine(string line)

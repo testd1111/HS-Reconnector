@@ -23,8 +23,9 @@ namespace HS_Reconnector.Core
                 HearthstoneProcessName, StringComparison.OrdinalIgnoreCase);
         }
 
-        public static bool IsHearthstoneRunning()
+        public static bool IsHearthstoneRunning(out DateTime startedAtUtc)
         {
+            startedAtUtc = DateTime.MinValue;
             int currentSessionId;
             using (var current = Process.GetCurrentProcess())
                 currentSessionId = current.SessionId;
@@ -37,7 +38,10 @@ namespace HS_Reconnector.Core
                     try
                     {
                         if (process.SessionId == currentSessionId && !process.HasExited)
+                        {
+                            startedAtUtc = process.StartTime.ToUniversalTime();
                             return true;
+                        }
                     }
                     catch
                     {
@@ -58,7 +62,7 @@ namespace HS_Reconnector.Core
             if (!string.IsNullOrWhiteSpace(customDirectory))
             {
                 var trimmed = customDirectory.Trim();
-                if (Directory.Exists(trimmed))
+                if (Directory.Exists(Path.Combine(trimmed, "Logs")))
                     return trimmed;
             }
 
@@ -85,7 +89,7 @@ namespace HS_Reconnector.Core
             return null;
         }
 
-        public static string FindLatestLogFile(string hearthstoneDirectory)
+        public static string FindLatestLogFile(string hearthstoneDirectory, DateTime notBeforeUtc = default)
         {
             if (string.IsNullOrWhiteSpace(hearthstoneDirectory))
                 return null;
@@ -100,6 +104,7 @@ namespace HS_Reconnector.Core
             {
                 var logFile = dir
                     .EnumerateFiles(LogSearchPattern)
+                    .Where(f => f.LastWriteTimeUtc >= notBeforeUtc)
                     .OrderByDescending(f => f.LastWriteTimeUtc)
                     .FirstOrDefault();
                 if (logFile != null)
@@ -107,7 +112,7 @@ namespace HS_Reconnector.Core
             }
 
             var directLog = Path.Combine(logRoot, LogSearchPattern);
-            return File.Exists(directLog) ? directLog : null;
+            return File.Exists(directLog) && File.GetLastWriteTimeUtc(directLog) >= notBeforeUtc ? directLog : null;
         }
 
         private static string TryFindFromRunningProcess()

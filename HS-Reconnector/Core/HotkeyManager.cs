@@ -1,7 +1,4 @@
 using System;
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Windows.Input;
 using System.Windows.Interop;
 using HS_Reconnector.Native;
@@ -12,27 +9,22 @@ namespace HS_Reconnector.Core
     {
         private const int WmHotkey = 0x0312;
         private const uint ModNoRepeat = 0x4000;
+        private const int HotkeyId = 1;
+        private readonly HwndSource messageWindow;
 
         private bool registered;
         private Key currentKey = Key.None;
         private HotkeyModifiers currentModifiers = HotkeyModifiers.None;
-        private ushort hotkeyAtom;
-        private int HotkeyId => hotkeyAtom;
 
         public event Action Pressed;
 
         public HotkeyManager()
         {
-            hotkeyAtom = Win32.GlobalAddAtom(
-                "HS-Reconnector-" +
-                Process.GetCurrentProcess().Id +
-                "-" +
-                Guid.NewGuid().ToString("N"));
-
-            if (hotkeyAtom == 0)
-                throw new Win32Exception(Marshal.GetLastWin32Error());
-
-            ComponentDispatcher.ThreadFilterMessage += ComponentDispatcher_ThreadFilterMessage;
+            messageWindow = new HwndSource(new HwndSourceParameters("HS-Reconnector Hotkey")
+            {
+                ParentWindow = new IntPtr(-3) // HWND_MESSAGE
+            });
+            messageWindow.AddHook(HandleMessage);
         }
 
         public bool Register(Key key, HotkeyModifiers modifiers)
@@ -62,7 +54,7 @@ namespace HS_Reconnector.Core
             Unregister();
 
             var virtualKey = KeyInterop.VirtualKeyFromKey(key);
-            registered = Win32.RegisterHotKey(IntPtr.Zero, HotkeyId, (uint)modifiers | ModNoRepeat, (uint)virtualKey);
+            registered = Win32.RegisterHotKey(messageWindow.Handle, HotkeyId, (uint)modifiers | ModNoRepeat, (uint)virtualKey);
             if (registered)
             {
                 currentKey = key;
@@ -74,7 +66,7 @@ namespace HS_Reconnector.Core
             if (hadPrevious)
             {
                 var prevVk = KeyInterop.VirtualKeyFromKey(previousKey);
-                if (Win32.RegisterHotKey(IntPtr.Zero, HotkeyId, (uint)previousModifiers | ModNoRepeat, (uint)prevVk))
+                if (Win32.RegisterHotKey(messageWindow.Handle, HotkeyId, (uint)previousModifiers | ModNoRepeat, (uint)prevVk))
                 {
                     registered = true;
                     currentKey = previousKey;
@@ -90,7 +82,7 @@ namespace HS_Reconnector.Core
             if (!registered)
                 return;
 
-            Win32.UnregisterHotKey(IntPtr.Zero, HotkeyId);
+            Win32.UnregisterHotKey(messageWindow.Handle, HotkeyId);
             registered = false;
             currentKey = Key.None;
             currentModifiers = HotkeyModifiers.None;
@@ -99,22 +91,17 @@ namespace HS_Reconnector.Core
         public void Dispose()
         {
             Unregister();
-            ComponentDispatcher.ThreadFilterMessage -= ComponentDispatcher_ThreadFilterMessage;
-
-            if (hotkeyAtom != 0)
-            {
-                Win32.GlobalDeleteAtom(hotkeyAtom);
-                hotkeyAtom = 0;
-            }
+            messageWindow.Dispose();
         }
 
-        private void ComponentDispatcher_ThreadFilterMessage(ref MSG msg, ref bool handled)
+        private IntPtr HandleMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
-            if (msg.message == WmHotkey && msg.wParam.ToInt32() == HotkeyId)
+            if (registered && message == WmHotkey && wParam.ToInt32() == HotkeyId)
             {
                 handled = true;
                 Pressed?.Invoke();
             }
+            return IntPtr.Zero;
         }
     }
 }

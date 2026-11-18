@@ -19,6 +19,7 @@ namespace HS_Reconnector.Core
     public sealed class AppSettings
     {
         private static AppSettings _instance;
+        private static bool preserveInvalidSettings;
         private static readonly object Sync = new object();
 
         public static string DataDirectory =>
@@ -26,8 +27,11 @@ namespace HS_Reconnector.Core
 
         public static string SettingsPath => Path.Combine(DataDirectory, "settings.xml");
 
-        public Key Hotkey { get; set; } = Key.R;
-        public HotkeyModifiers HotkeyModifiers { get; set; } = HotkeyModifiers.Control | HotkeyModifiers.Shift;
+        internal const Key DefaultHotkey = Key.F10;
+        internal const HotkeyModifiers DefaultHotkeyModifiers = HotkeyModifiers.Control | HotkeyModifiers.Alt;
+
+        public Key Hotkey { get; set; } = DefaultHotkey;
+        public HotkeyModifiers HotkeyModifiers { get; set; } = DefaultHotkeyModifiers;
         public int ReconnectCooldownSeconds { get; set; } = 2;
         public int DisconnectTimeoutSeconds { get; set; } = 20;
 
@@ -61,21 +65,29 @@ namespace HS_Reconnector.Core
             }
         }
 
-        public static void Load()
+        public static void Load() => Load(SettingsPath);
+
+        internal static void Load(string settingsPath)
         {
             lock (Sync)
             {
                 try
                 {
-                    if (File.Exists(SettingsPath))
+                    if (File.Exists(settingsPath))
                     {
                         var serializer = new XmlSerializer(typeof(AppSettings));
-                        using (var stream = File.OpenRead(SettingsPath))
+                        using (var stream = File.OpenRead(settingsPath))
                         {
                             if (serializer.Deserialize(stream) is AppSettings loaded)
                                 _instance = loaded;
+                            preserveInvalidSettings = false;
                         }
                     }
+                }
+                catch (InvalidOperationException ex)
+                {
+                    preserveInvalidSettings = true;
+                    AppLogger.Error("Could not deserialize settings: " + ex.Message);
                 }
                 catch (Exception ex)
                 {
@@ -86,34 +98,40 @@ namespace HS_Reconnector.Core
             }
         }
 
-        public static void Save()
+        public static void Save() => Save(SettingsPath);
+
+        internal static void Save(string settingsPath)
         {
             lock (Sync)
             {
                 try
                 {
                     Instance.Normalize();
-                    Directory.CreateDirectory(DataDirectory);
+                    Directory.CreateDirectory(Path.GetDirectoryName(settingsPath));
                     var serializer = new XmlSerializer(typeof(AppSettings));
-                    var tempPath = SettingsPath + ".tmp";
-                    var backupPath = SettingsPath + ".bak";
+                    var tempPath = settingsPath + ".tmp";
+                    var backupPath = preserveInvalidSettings
+                        ? settingsPath + "." + Guid.NewGuid().ToString("N") + ".corrupt"
+                        : settingsPath + ".bak";
                     using (var stream = File.Create(tempPath))
                     {
                         serializer.Serialize(stream, Instance);
                     }
-                    if (File.Exists(SettingsPath))
+                    if (File.Exists(settingsPath))
                     {
-                        File.Replace(tempPath, SettingsPath, backupPath, true);
-                        TryDeleteFile(backupPath);
+                        File.Replace(tempPath, settingsPath, backupPath, true);
+                        if (!preserveInvalidSettings)
+                            TryDeleteFile(backupPath);
                     }
                     else
                     {
-                        File.Move(tempPath, SettingsPath);
+                        File.Move(tempPath, settingsPath);
                     }
+                    preserveInvalidSettings = false;
                 }
                 catch (Exception ex)
                 {
-                    TryDeleteFile(SettingsPath + ".tmp");
+                    TryDeleteFile(settingsPath + ".tmp");
                     AppLogger.Error("Failed to save settings: " + ex.Message);
                 }
             }
@@ -142,8 +160,8 @@ namespace HS_Reconnector.Core
 
             if (Hotkey == Key.F12 || (Hotkey != Key.None && HotkeyModifiers == HotkeyModifiers.None))
             {
-                Hotkey = Key.R;
-                HotkeyModifiers = HotkeyModifiers.Control | HotkeyModifiers.Shift;
+                Hotkey = DefaultHotkey;
+                HotkeyModifiers = DefaultHotkeyModifiers;
             }
 
             if (double.IsInfinity(OverlayLeft))

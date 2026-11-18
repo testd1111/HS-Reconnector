@@ -28,6 +28,7 @@ namespace HS_Reconnector
         {
             base.OnStartup(e);
 
+            showWindowEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
             bool createdNew;
             singleInstanceMutex = new Mutex(true, MutexName, out createdNew);
             if (!createdNew)
@@ -35,8 +36,7 @@ namespace HS_Reconnector
                 try
                 {
                     Win32.AllowSetForegroundWindow(Win32.ASFW_ANY);
-                    using (var ev = EventWaitHandle.OpenExisting(ShowEventName))
-                        ev.Set();
+                    showWindowEvent.Set();
                 }
                 catch
                 {
@@ -51,7 +51,6 @@ namespace HS_Reconnector
             AppSettings.Load();
             AppLogger.Info("HS-Reconnector started.");
 
-            showWindowEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
             showWindowWaitHandle = ThreadPool.RegisterWaitForSingleObject(
                 showWindowEvent,
                 (state, timedOut) => Dispatcher.BeginInvoke(new Action(ShowMainWindow)),
@@ -96,7 +95,8 @@ namespace HS_Reconnector
                 trayIcon?.UpdateState(controller.GetSnapshot());
             };
 
-            controller.Start();
+            if (!controller.Start())
+                mainWindow.ShowHotkeyError(AppSettings.Instance.HotkeyModifiers, AppSettings.Instance.Hotkey);
             overlayWindow.ApplySettingsAndPosition();
             startupCompleted = true;
 

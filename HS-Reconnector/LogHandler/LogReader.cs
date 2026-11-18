@@ -278,10 +278,6 @@ namespace HS_Reconnector.LogHandler
                     if (ComputeSpanHash(fs, offset) != spanHashValue)
                         return true;
                 }
-                else
-                {
-                    return true;
-                }
             }
 
             return false;
@@ -354,6 +350,8 @@ namespace HS_Reconnector.LogHandler
                     fs.Seek(offset - tailCount, SeekOrigin.Begin);
                     tailFingerprintLength = ReadExact(fs, tailFingerprint, tailCount);
                     tailFingerprintEndOffset = tailFingerprintLength > 0 ? offset : 0;
+                    discardUntilLineFeed = tailFingerprintLength > 0
+                        && tailFingerprint[tailFingerprintLength - 1] != (byte)'\n';
                 }
 
                 if (offset <= MaxSpanHashBytes)

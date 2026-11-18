@@ -47,6 +47,7 @@ namespace HS_Reconnector.UI
         private bool isGameInForeground;
         private bool isDragging;
         private bool isHovered;
+        private bool reconnectPressed;
         private Point dragStartScreen;
         private Point dragStartWindow;
         private ControllerSnapshot lastSnapshot;
@@ -248,7 +249,7 @@ namespace HS_Reconnector.UI
                     RootBorder.Cursor = Cursors.Arrow;
                     break;
                 default:
-                    StatusText.Text = mini ? "R" : Localization.Get("BtnReconnect");
+                    StatusText.Text = mini ? "–" : Localization.Get("BtnReconnect");
                     InnerBorder.Background = IdleBg;
                     InnerBorder.BorderBrush = IdleBorder;
                     StatusText.Fill = MutedText;
@@ -324,9 +325,16 @@ namespace HS_Reconnector.UI
             Top = Math.Max(minTop, Math.Min(maxTop, settings.OverlayTop));
         }
 
+        private void RootBorder_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            reconnectPressed = previewSettings == null && lastSnapshot?.CanReconnect == true;
+        }
+
         private void RootBorder_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
-            if (previewSettings == null && lastSnapshot?.CanReconnect == true)
+            var shouldReconnect = reconnectPressed && previewSettings == null && lastSnapshot?.CanReconnect == true;
+            reconnectPressed = false;
+            if (shouldReconnect)
                 ReconnectRequested?.Invoke();
         }
 
@@ -389,6 +397,7 @@ namespace HS_Reconnector.UI
 
         private void RootBorder_MouseLeave(object sender, MouseEventArgs e)
         {
+            reconnectPressed = false;
             isHovered = false;
             UpdateVisibilityAndVisuals();
         }

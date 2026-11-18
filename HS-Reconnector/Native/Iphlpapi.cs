@@ -139,7 +139,7 @@ namespace HS_Reconnector.Native
         {
             return GetTCPConnections<MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID>(
                 AF_INET,
-                TCP_TABLE_CLASS.TCP_TABLE_OWNER_PID_ALL);
+                TCP_TABLE_CLASS.TCP_TABLE_OWNER_PID_CONNECTIONS);
         }
 
         private static List<IPR> GetTCPConnections<IPR, IPT>(int ipVersion, TCP_TABLE_CLASS tableClass)

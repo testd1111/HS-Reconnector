@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Windows.Input;
+using System.Windows.Threading;
 using HS_Reconnector.Core;
 using HS_Reconnector.LogHandler;
 
@@ -67,6 +68,7 @@ class TestHarness
         }
     }
 
+    [STAThread]
     static int Main()
     {
         AppLogger.DisableFileLogging = true;
@@ -80,20 +82,12 @@ class TestHarness
 
         Test("unbracketed IPv6 log entry invalidates cached IPv4", () =>
         {
-            var sink = new FakeSink();
-            var handler = new ConnectionLogHandler();
-            handler.Handle("Network.GotoGameServe() address=203.0.113.10:1119", sink);
-            handler.Handle("Network.GotoGameServe() address=2001:db8::1:1119", sink);
-            Check(sink.Address == null && sink.Port == 0 && sink.Unsupported, "old IPv4 not invalidated");
+            CheckUnsupportedEndpoint("2001:db8::1:1119");
         });
 
         Test("port 0 log entry invalidates cached IPv4", () =>
         {
-            var sink = new FakeSink();
-            var handler = new ConnectionLogHandler();
-            handler.Handle("Network.GotoGameServe() address=203.0.113.10:1119", sink);
-            handler.Handle("Network.GotoGameServe() address=203.0.113.20:0", sink);
-            Check(sink.Address == null && sink.Port == 0 && sink.Unsupported, "port 0 did not invalidate cache");
+            CheckUnsupportedEndpoint("203.0.113.20:0");
         });
 
         Test("EndGameScreen clears active endpoint", () =>
@@ -110,10 +104,9 @@ class TestHarness
             var text = "Network.GotoGameServe() address=203.0.113.10:1119\nNetwork.DisconnectFromGameServer() - Reason: EndGameScreen\n";
             using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(text)))
             {
-                object[] args = { stream, stream.Length, new ConnectionLogHandler(), null, (ushort)0, false };
-                var method = typeof(LogWatcher).GetMethod("TryFindLatestEndpoint", BindingFlags.NonPublic | BindingFlags.Static);
-                var found = (bool)method.Invoke(null, args);
-                Check(!found && (bool)args[5], "ended match endpoint should not be selected");
+                var found = LogWatcher.TryFindLatestEndpointWithEvent(stream, stream.Length, new ConnectionLogHandler(),
+                    out _, out _, out var ended, out _, out _);
+                Check(!found && ended, "ended match endpoint should not be selected");
             }
         });
 
@@ -122,10 +115,9 @@ class TestHarness
             var text = "Network.GotoGameServe() address=203.0.113.10:1119\nNetwork.GotoGameServe() address=2001:db8::1:1119\nNetwork.GotoGameServe() address=203.0.113.20:1";
             using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(text)))
             {
-                object[] args = { stream, stream.Length, new ConnectionLogHandler(), null, (ushort)0, false };
-                var method = typeof(LogWatcher).GetMethod("TryFindLatestEndpoint", BindingFlags.NonPublic | BindingFlags.Static);
-                var found = (bool)method.Invoke(null, args);
-                Check(found && (string)args[3] == "2001:db8::1" && (ushort)args[4] == 1119, "scan fell back past IPv6");
+                var found = LogWatcher.TryFindLatestEndpointWithEvent(stream, stream.Length, new ConnectionLogHandler(),
+                    out var host, out var port, out _, out _, out _);
+                Check(found && host == "2001:db8::1" && port == 1119, "scan fell back past IPv6");
             }
         });
 
@@ -162,7 +154,6 @@ class TestHarness
             {
                 File.WriteAllText(path, "Network.GotoGameServe() address=203.0.113.10:1119\n", new UTF8Encoding(false));
                 var sink = new FakeSink();
-                var watcher = new LogWatcher(sink, path);
                 var handler = new ConnectionLogHandler();
                 using (var reader = new LogReader(path))
                 {
@@ -190,7 +181,29 @@ class TestHarness
                     readMethod.Invoke(reader, null);
                     Check(sink.Address == null && sink.Port == 0, "stale endpoint survived log overwrite without match");
                 }
-                watcher.Dispose();
+            }
+            finally { File.Delete(path); }
+        });
+
+        Test("timestamp-only change does not replay a large log", () =>
+        {
+            var path = Path.GetTempFileName();
+            try
+            {
+                const long size = 17 * 1024 * 1024;
+                using (var stream = File.OpenWrite(path))
+                    stream.SetLength(size);
+                using (var reader = new LogReader(path, size))
+                {
+                    typeof(LogReader).GetField("offset", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(reader, size);
+                    var resets = 0;
+                    reader.OnReset += () => resets++;
+                    var read = typeof(LogReader).GetMethod("ReadAvailableLines", BindingFlags.NonPublic | BindingFlags.Instance);
+                    read.Invoke(reader, null);
+                    File.SetLastWriteTimeUtc(path, File.GetLastWriteTimeUtc(path).AddSeconds(5));
+                    read.Invoke(reader, null);
+                    Check(resets == 0, "timestamp change reset the reader");
+                }
             }
             finally { File.Delete(path); }
         });
@@ -309,7 +322,7 @@ class TestHarness
             s.Normalize();
             Check(s.ReconnectCooldownSeconds == 10 && s.DisconnectTimeoutSeconds == 5, "timers not clamped");
             Check(s.OverlayOpacityPercent == 15 && s.OverlayBackgroundOpacityPercent == 0 && s.OverlayScalePercent == 150, "overlay bounds not clamped");
-            Check(s.Hotkey == Key.R && s.HotkeyModifiers == (HotkeyModifiers.Control | HotkeyModifiers.Shift), "F12 not reset");
+            Check(s.Hotkey == Key.F10 && s.HotkeyModifiers == (HotkeyModifiers.Control | HotkeyModifiers.Alt), "F12 not reset");
         });
 
         Test("HearthstoneLocator finds newest session log", () =>
@@ -331,6 +344,10 @@ class TestHarness
                 Directory.CreateDirectory(Path.Combine(tempRoot, "Logs", "Hearthstone_3_empty"));
                 var foundAfterEmpty = HearthstoneLocator.FindLatestLogFile(tempRoot);
                 Check(string.Equals(foundAfterEmpty, expected, StringComparison.OrdinalIgnoreCase), "empty newer dir broke log lookup");
+                var gameStarted = File.GetLastWriteTimeUtc(expected).AddSeconds(1);
+                Check(HearthstoneLocator.FindLatestLogFile(tempRoot, gameStarted) == null, "old session log was accepted");
+                File.SetLastWriteTimeUtc(expected, gameStarted);
+                Check(HearthstoneLocator.FindLatestLogFile(tempRoot, gameStarted) == expected, "current session log was rejected");
             }
             finally
             {
@@ -338,7 +355,45 @@ class TestHarness
             }
         });
 
+        Test("settings round trip preserves malformed XML before replacing it", () =>
+        {
+            var path = Path.GetTempFileName();
+            const string invalid = "<AppSettings><UseMiniOverlay>";
+            try
+            {
+                File.WriteAllText(path, invalid);
+                AppSettings.Load(path);
+                AppSettings.Instance.UseMiniOverlay = true;
+                AppSettings.Save(path);
+                var backups = Directory.GetFiles(Path.GetDirectoryName(path), Path.GetFileName(path) + ".*.corrupt");
+                Check(backups.Length == 1 && File.ReadAllText(backups[0]) == invalid, "invalid XML was not preserved");
+                AppSettings.Instance.UseMiniOverlay = false;
+                AppSettings.Load(path);
+                Check(AppSettings.Instance.UseMiniOverlay, "saved overlay setting was not restored");
+            }
+            finally
+            {
+                foreach (var backup in Directory.GetFiles(Path.GetDirectoryName(path), Path.GetFileName(path) + ".*.corrupt"))
+                    File.Delete(backup);
+                File.Delete(path);
+            }
+        });
+
         Console.WriteLine("Failures: " + failures);
         return failures == 0 ? 0 : 1;
+    }
+
+    static void CheckUnsupportedEndpoint(string endpoint)
+    {
+        using (var controller = new ReconnectController(Dispatcher.CurrentDispatcher))
+        {
+            var handler = new ConnectionLogHandler();
+            handler.Handle("Network.GotoGameServe() address=203.0.113.10:1119", controller);
+            Check(controller.GetSnapshot().RemoteAddress == "203.0.113.10", "initial IPv4 not set");
+            handler.Handle("Network.GotoGameServe() address=" + endpoint, controller);
+            var snapshot = controller.GetSnapshot();
+            Check(snapshot.RemoteAddress == null && snapshot.RemotePort == 0 && snapshot.EndpointUnsupported,
+                "invalid endpoint did not clear the cached IPv4");
+        }
     }
 }

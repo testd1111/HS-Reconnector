@@ -16,6 +16,7 @@
             Height="46"
             Background="Transparent"
             Cursor="Hand"
+            MouseLeftButtonDown="RootBorder_MouseLeftButtonDown"
             MouseLeftButtonUp="RootBorder_MouseLeftButtonUp"
             MouseRightButtonDown="RootBorder_MouseRightButtonDown"
             MouseMove="RootBorder_MouseMove"
