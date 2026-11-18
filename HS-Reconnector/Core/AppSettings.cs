@@ -43,8 +43,10 @@ namespace HS_Reconnector.Core
         public int OverlayOpacityPercent { get; set; } = 95;
         public int OverlayBackgroundOpacityPercent { get; set; } = 100;
         public int OverlayScalePercent { get; set; } = 100;
+        public int OverlayFontWeight { get; set; } = 2;
         public double OverlayLeft { get; set; } = double.NaN;
         public double OverlayTop { get; set; } = double.NaN;
+        public NetworkOverlaySettings NetworkOverlay { get; set; } = new NetworkOverlaySettings();
 
         public bool MinimizeToTrayOnClose { get; set; } = true;
         public bool MinimizeToTrayOnMinimize { get; set; } = false;
@@ -152,11 +154,14 @@ namespace HS_Reconnector.Core
 
         public void Normalize()
         {
+            NetworkOverlay = NetworkOverlay ?? new NetworkOverlaySettings();
+            NetworkOverlay.Normalize();
             ReconnectCooldownSeconds = Clamp(ReconnectCooldownSeconds, 0, 10);
             DisconnectTimeoutSeconds = Clamp(DisconnectTimeoutSeconds, 5, 60);
             OverlayOpacityPercent = Clamp(OverlayOpacityPercent, 15, 100);
             OverlayBackgroundOpacityPercent = Clamp(OverlayBackgroundOpacityPercent, 0, 100);
             OverlayScalePercent = Clamp(OverlayScalePercent, 75, 150);
+            OverlayFontWeight = Clamp(OverlayFontWeight, 0, 3);
 
             if (Hotkey == Key.F12 || (Hotkey != Key.None && HotkeyModifiers == HotkeyModifiers.None))
             {
@@ -199,6 +204,43 @@ namespace HS_Reconnector.Core
             if (value > max)
                 return max;
             return value;
+        }
+    }
+
+    public sealed class NetworkOverlaySettings
+    {
+        public bool Enabled { get; set; }
+        public bool ShowRegion { get; set; } = true;
+        public string Region { get; set; } = "Auto";
+        public bool ShowAddress { get; set; }
+        public bool ShowFailedChecks { get; set; } = true;
+        public bool HideZeroFailures { get; set; } = true;
+        public bool Compact { get; set; } = true;
+        public bool Locked { get; set; } = true;
+        public int Weight { get; set; } = 1;
+        public int Scale { get; set; } = 100;
+        public int BackgroundOpacity { get; set; } = 10;
+        public int Opacity { get; set; } = 100;
+        public bool AttachedToReconnect { get; set; } = true;
+        public int Interval { get; set; } = 3;
+        public double Left { get; set; } = double.NaN;
+        public double Top { get; set; } = double.NaN;
+
+        internal void Normalize()
+        {
+            if (Region != "EU" && Region != "US" && Region != "ASIA" && Region != "CHINA")
+                Region = "Auto";
+            Weight = Math.Max(0, Math.Min(3, Weight));
+            Scale = Math.Max(75, Math.Min(150, Scale));
+            BackgroundOpacity = Math.Max(0, Math.Min(100, BackgroundOpacity));
+            Opacity = Math.Max(15, Math.Min(100, Opacity));
+            Interval = Math.Max(2, Math.Min(10, Interval));
+            if (double.IsInfinity(Left))
+                Left = double.NaN;
+            if (double.IsInfinity(Top))
+                Top = double.NaN;
+            if (double.IsNaN(Left) || double.IsNaN(Top))
+                AttachedToReconnect = true;
         }
     }
 }

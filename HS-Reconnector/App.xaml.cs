@@ -19,6 +19,7 @@ namespace HS_Reconnector
         private RegisteredWaitHandle showWindowWaitHandle;
         private ReconnectController controller;
         private OverlayWindow overlayWindow;
+        private NetworkOverlayWindow networkOverlay;
         private MainWindow mainWindow;
         private TrayIconController trayIcon;
         private bool startupCompleted;
@@ -60,7 +61,8 @@ namespace HS_Reconnector
 
             controller = new ReconnectController(Dispatcher);
             overlayWindow = new OverlayWindow();
-            mainWindow = new MainWindow(controller, overlayWindow);
+            networkOverlay = new NetworkOverlayWindow(overlayWindow);
+            mainWindow = new MainWindow(controller, overlayWindow, networkOverlay);
             mainWindow.Closed += (s, args) =>
             {
                 mainWindow = null;
@@ -86,6 +88,7 @@ namespace HS_Reconnector
             {
                 mainWindow?.UpdateState(snapshot);
                 overlayWindow?.UpdateState(snapshot);
+                networkOverlay?.UpdateState(snapshot);
                 trayIcon?.UpdateState(snapshot);
             };
 
@@ -126,6 +129,7 @@ namespace HS_Reconnector
             showWindowEvent?.Dispose();
             trayIcon?.Dispose();
             controller?.Dispose();
+            networkOverlay?.Close();
             overlayWindow?.Close();
             mainWindow?.Close();
             singleInstanceMutex?.Dispose();

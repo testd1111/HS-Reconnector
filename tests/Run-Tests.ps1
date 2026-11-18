@@ -46,6 +46,7 @@ $sources = @(
     'HS-Reconnector\Core\AppSettings.cs',
     'HS-Reconnector\Core\HearthstoneLocator.cs',
     'HS-Reconnector\Core\HotkeyManager.cs',
+    'HS-Reconnector\Core\NetworkProbe.cs',
     'HS-Reconnector\Core\ReconnectController.cs',
     'HS-Reconnector\Core\Reconnector.cs',
     'HS-Reconnector\Native\Iphlpapi.cs',

@@ -16,6 +16,12 @@ A standalone Windows app for reconnecting to your current Hearthstone match with
 
 Requires Windows 10 (1803+) or Windows 11, x64. The app detects Hearthstone automatically and lets you customize the global hotkey and the overlay.
 
+## Ping & Region
+
+The optional in-game overlay shows match-server latency and region. Enable it under **Ping & Region**. See [how it works and how to configure it](PING.md).
+
+![Ping and region above the reconnect button](docs/screenshots/ping-overlay.png)
+
 [Build and test instructions](BUILD_AND_INSTALL.md)
 
 [MIT License](LICENSE)

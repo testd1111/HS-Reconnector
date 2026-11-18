@@ -457,6 +457,13 @@
 
                             <DockPanel Margin="0,4,0,0">
                                 <Button x:Name="TestOverlayButton" DockPanel.Dock="Left" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="TestOverlayButton_Click" Content="TEST" />
+                                <TextBlock x:Name="OverlayWeightLabel" DockPanel.Dock="Left" VerticalAlignment="Center" Margin="8,0,8,0" />
+                                <ComboBox x:Name="OverlayWeightCombo" DockPanel.Dock="Left" MinWidth="112" Margin="0,0,8,0" SelectionChanged="OverlayCheck_Changed">
+                                    <ComboBoxItem x:Name="OverlayNormalItem" />
+                                    <ComboBoxItem x:Name="OverlaySemiboldItem" />
+                                    <ComboBoxItem x:Name="OverlayBoldItem" />
+                                    <ComboBoxItem x:Name="OverlayExtraBoldItem" />
+                                </ComboBox>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                     <Button x:Name="ResetOverlayButton" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ResetOverlayButton_Click" Content="Reset Overlay Pos" />
                                     <Button x:Name="SaveSettingsButton" Style="{StaticResource PrimaryButton}" Click="SaveSettingsButton_Click" Content="Save &amp; Apply" />
@@ -507,6 +514,87 @@
             </TabItem>
 
             <!-- Tab 3: Activity Log -->
+            <TabItem x:Name="TabNetwork">
+                <Border Background="{StaticResource CardBg}" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="9" Padding="16,14" Margin="0,6,0,0">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <TextBlock x:Name="NetworkHintText" TextWrapping="Wrap" Margin="0,0,0,10" Foreground="#93A4B8" />
+                            <CheckBox x:Name="NetworkEnabledCheck" Checked="NetworkPreviewSettings_Changed" Unchecked="NetworkPreviewSettings_Changed" />
+                            <CheckBox x:Name="NetworkShowRegionCheck" Checked="NetworkPreviewSettings_Changed" Unchecked="NetworkPreviewSettings_Changed" />
+                            <CheckBox x:Name="NetworkShowAddressCheck" Checked="NetworkPreviewSettings_Changed" Unchecked="NetworkPreviewSettings_Changed" />
+                            <CheckBox x:Name="NetworkShowFailedChecksCheck" Checked="NetworkPreviewSettings_Changed" Unchecked="NetworkPreviewSettings_Changed" />
+                            <CheckBox x:Name="NetworkHideZeroFailuresCheck" Checked="NetworkPreviewSettings_Changed" Unchecked="NetworkPreviewSettings_Changed" />
+                            <CheckBox x:Name="NetworkCompactCheck" Checked="NetworkPreviewSettings_Changed" Unchecked="NetworkPreviewSettings_Changed" />
+                            <CheckBox x:Name="NetworkLockedCheck" Checked="NetworkPreviewSettings_Changed" Unchecked="NetworkPreviewSettings_Changed" />
+                            <WrapPanel Margin="0,8,0,8">
+                                <TextBlock x:Name="NetworkRegionLabel" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <ComboBox x:Name="NetworkRegionCombo" MinWidth="150" Margin="0,0,20,0" SelectionChanged="NetworkPreviewSettings_Changed">
+                                    <ComboBoxItem x:Name="NetworkAutoItem" Tag="Auto" />
+                                    <ComboBoxItem Content="EU" Tag="EU" />
+                                    <ComboBoxItem Content="US" Tag="US" />
+                                    <ComboBoxItem Content="ASIA" Tag="ASIA" />
+                                    <ComboBoxItem Content="CHINA" Tag="CHINA" />
+                                </ComboBox>
+                                <TextBlock x:Name="NetworkWeightLabel" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <ComboBox x:Name="NetworkWeightCombo" MinWidth="130" SelectionChanged="NetworkPreviewSettings_Changed">
+                                    <ComboBoxItem x:Name="NetworkNormalItem" />
+                                    <ComboBoxItem x:Name="NetworkSemiboldItem" />
+                                    <ComboBoxItem x:Name="NetworkBoldItem" />
+                                    <ComboBoxItem x:Name="NetworkExtraBoldItem" />
+                                </ComboBox>
+                            </WrapPanel>
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="205" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="48" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="NetworkScaleLabel" VerticalAlignment="Center" />
+                                <Slider x:Name="NetworkScaleSlider" Grid.Column="1" Minimum="75" Maximum="150" Value="100" TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,0,10,0" ValueChanged="NetworkSlider_Changed" />
+                                <TextBlock x:Name="NetworkScaleValue" Grid.Column="2" Text="100%" Foreground="#4CC2FF" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                            </Grid>
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="205" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="48" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="NetworkOpacityLabel" VerticalAlignment="Center" />
+                                <Slider x:Name="NetworkOpacitySlider" Grid.Column="1" Minimum="15" Maximum="100" Value="100" TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,0,10,0" ValueChanged="NetworkSlider_Changed" />
+                                <TextBlock x:Name="NetworkOpacityValue" Grid.Column="2" Text="100%" Foreground="#4CC2FF" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                            </Grid>
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="205" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="48" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="NetworkBackgroundOpacityLabel" VerticalAlignment="Center" />
+                                <Slider x:Name="NetworkBackgroundOpacitySlider" Grid.Column="1" Minimum="0" Maximum="100" Value="10" TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,0,10,0" ValueChanged="NetworkSlider_Changed" />
+                                <TextBlock x:Name="NetworkBackgroundOpacityValue" Grid.Column="2" Text="10%" Foreground="#4CC2FF" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                            </Grid>
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="205" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="48" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="NetworkIntervalLabel" VerticalAlignment="Center" />
+                                <Slider x:Name="NetworkIntervalSlider" Grid.Column="1" Minimum="2" Maximum="10" Value="3" TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,0,10,0" ValueChanged="NetworkSlider_Changed" />
+                                <TextBlock x:Name="NetworkIntervalValue" Grid.Column="2" Text="3s" Foreground="#4CC2FF" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                            </Grid>
+                            <DockPanel Margin="0,4,0,0">
+                                <Button x:Name="NetworkPreviewButton" DockPanel.Dock="Left" Style="{StaticResource SecondaryButton}" Click="NetworkPreview_Click" Content="TEST" />
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                    <Button x:Name="NetworkResetPositionButton" Style="{StaticResource SecondaryButton}" Click="NetworkResetPosition_Click" Margin="0,0,8,0" />
+                                    <Button x:Name="NetworkSaveButton" Style="{StaticResource PrimaryButton}" Click="NetworkSave_Click" />
+                                </StackPanel>
+                            </DockPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+            </TabItem>
+
             <TabItem x:Name="TabLogs">
                 <Border Background="{StaticResource CardBg}" BorderBrush="{StaticResource CardBorder}" BorderThickness="1" CornerRadius="9" Padding="12" Margin="0,6,0,0">
                     <Grid>

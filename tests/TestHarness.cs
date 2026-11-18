@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Net;
+using System.Net.Sockets;
 using System.Reflection;
 using System.Text;
 using System.Threading;
@@ -377,6 +379,41 @@ class TestHarness
                     File.Delete(backup);
                 File.Delete(path);
             }
+        });
+
+        Test("network overlay defaults off and detects the latest known region from the log", () =>
+        {
+            var path = Path.GetTempFileName();
+            try
+            {
+                Check(!new AppSettings().NetworkOverlay.Enabled, "network overlay enabled by default");
+                File.WriteAllText(path, "Connecting to server. address=us.actual.battle.net port=1119\n"
+                    + "Connecting to server. address=kr.actual.battle.net port=1119\n"
+                    + "Connecting to server. address=eu.actual.battle.net.example.org port=1119\n");
+                Check(NetworkProbe.ReadRegion(path) == "ASIA", "incorrect region or address suffix not rejected");
+                foreach (var sample in new[] { ("EU", "EU"), ("US", "US"), ("KR", "ASIA"),
+                    ("TW", "ASIA"), ("ASIA", "ASIA"), ("CN", "CHINA"), ("CHINA", "CHINA") })
+                {
+                    File.WriteAllText(path, "Region: " + sample.Item1 + "\n");
+                    Check(NetworkProbe.ReadRegion(path) == sample.Item2, "unexpected region for " + sample.Item1);
+                }
+                File.WriteAllText(path, "Network.GotoGameServe() address=192.0.2.1:1119\n");
+                Check(NetworkProbe.ReadRegion(path) == null, "guessed a region from an IP");
+            }
+            finally { File.Delete(path); }
+        });
+
+        Test("TCP probe measures a successful loopback connection", () =>
+        {
+            var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            try
+            {
+                var port = (ushort)((IPEndPoint)listener.LocalEndpoint).Port;
+                Check(NetworkProbe.MeasureAsync(IPAddress.Loopback, port).GetAwaiter().GetResult().HasValue,
+                    "loopback connection was not measured");
+            }
+            finally { listener.Stop(); }
         });
 
         Console.WriteLine("Failures: " + failures);

@@ -29,6 +29,7 @@ namespace HS_Reconnector.UI
 
         private readonly ReconnectController controller;
         private readonly OverlayWindow overlayWindow;
+        private readonly NetworkOverlayWindow networkOverlay;
         private Key draftHotkey;
         private HotkeyModifiers draftModifiers;
         private Key failedHotkey = Key.None;
@@ -37,15 +38,16 @@ namespace HS_Reconnector.UI
         private bool allowExit;
         private int logRefreshPending;
 
-        internal MainWindow(ReconnectController controller, OverlayWindow overlayWindow)
+        internal MainWindow(ReconnectController controller, OverlayWindow overlayWindow, NetworkOverlayWindow networkOverlay)
         {
             this.controller = controller;
             this.overlayWindow = overlayWindow;
+            this.networkOverlay = networkOverlay;
             loadingDraft = true;
             InitializeComponent();
 
             var version = Assembly.GetExecutingAssembly().GetName().Version;
-            VersionText.Text = string.Format("v{0}.{1}.{2}", version.Major, version.Minor, version.Build);
+            VersionText.Text = "v" + version.ToString(version.Build == 0 ? 2 : 3);
 
             LoadSettingsToForm();
             ApplyLocalization();
@@ -224,6 +226,8 @@ namespace HS_Reconnector.UI
                 OpacitySlider.Value = s.OverlayOpacityPercent;
                 BgOpacitySlider.Value = s.OverlayBackgroundOpacityPercent;
                 ScaleSlider.Value = s.OverlayScalePercent;
+                OverlayWeightCombo.SelectedIndex = s.OverlayFontWeight;
+                LoadNetworkSettings(s.NetworkOverlay);
 
                 MinimizeToTrayCheck.IsChecked = s.MinimizeToTrayOnClose;
                 MinimizeToTrayOnMinimizeCheck.IsChecked = s.MinimizeToTrayOnMinimize;
@@ -264,6 +268,11 @@ namespace HS_Reconnector.UI
             OverlayOnlyMatchCheck.Content = Localization.Get("OptOverlayOnlyMatch");
             OverlayOnlyWhenFocusedCheck.Content = Localization.Get("OptOverlayOnlyWhenFocused");
             LockOverlayCheck.Content = Localization.Get("OptLockOverlay");
+            OverlayWeightLabel.Text = Localization.Get("NetworkWeight");
+            OverlayNormalItem.Content = Localization.Get("NetworkNormal");
+            OverlaySemiboldItem.Content = Localization.Get("NetworkSemibold");
+            OverlayBoldItem.Content = Localization.Get("NetworkBold");
+            OverlayExtraBoldItem.Content = Localization.Get("NetworkExtraBold");
             MiniOverlayCheck.Content = Localization.Get("OptMiniOverlay");
             TestOverlayButton.ToolTip = Localization.Get("OverlayTestTooltip");
             OptOpacityLabel.Text = Localization.Get("OptOverlayOpacity");
@@ -295,6 +304,7 @@ namespace HS_Reconnector.UI
             LangEnButton.ToolTip = Localization.Get("LangSwitchTooltipEn");
 
             UpdateSliderTexts();
+            LocalizeNetworkSettings();
 
             if (!HotkeyBox.IsKeyboardFocused)
                 HotkeyBox.Text = FormatHotkey(draftModifiers, draftHotkey);
@@ -303,6 +313,121 @@ namespace HS_Reconnector.UI
                 HotkeyErrorText.Text = Localization.Format("HotkeyRegisterFailed", FormatHotkey(failedModifiers, failedHotkey));
 
             UpdateState(controller.GetSnapshot());
+        }
+
+        private void LoadNetworkSettings(NetworkOverlaySettings settings)
+        {
+            NetworkEnabledCheck.IsChecked = settings.Enabled;
+            NetworkShowRegionCheck.IsChecked = settings.ShowRegion;
+            NetworkShowAddressCheck.IsChecked = settings.ShowAddress;
+            NetworkShowFailedChecksCheck.IsChecked = settings.ShowFailedChecks;
+            NetworkHideZeroFailuresCheck.IsChecked = settings.HideZeroFailures;
+            NetworkCompactCheck.IsChecked = settings.Compact;
+            NetworkLockedCheck.IsChecked = settings.Locked;
+            foreach (ComboBoxItem option in NetworkRegionCombo.Items)
+            {
+                if (string.Equals(option.Tag as string, settings.Region, StringComparison.Ordinal))
+                {
+                    NetworkRegionCombo.SelectedItem = option;
+                    break;
+                }
+            }
+            NetworkWeightCombo.SelectedIndex = settings.Weight;
+            NetworkScaleSlider.Value = settings.Scale;
+            NetworkOpacitySlider.Value = settings.Opacity;
+            NetworkBackgroundOpacitySlider.Value = settings.BackgroundOpacity;
+            NetworkIntervalSlider.Value = settings.Interval;
+        }
+
+        private void LocalizeNetworkSettings()
+        {
+            TabNetwork.Header = Localization.Get("NetworkTab");
+            NetworkHintText.Text = Localization.Get("NetworkHint");
+            NetworkEnabledCheck.Content = Localization.Get("NetworkEnable");
+            NetworkShowRegionCheck.Content = Localization.Get("NetworkShowRegion");
+            NetworkShowAddressCheck.Content = Localization.Get("NetworkShowAddress");
+            NetworkShowFailedChecksCheck.Content = Localization.Get("NetworkShowFailures");
+            NetworkHideZeroFailuresCheck.Content = Localization.Get("NetworkHideZero");
+            NetworkCompactCheck.Content = Localization.Get("NetworkCompact");
+            NetworkLockedCheck.Content = Localization.Get("NetworkLocked");
+            NetworkRegionLabel.Text = Localization.Get("NetworkRegion");
+            NetworkWeightLabel.Text = Localization.Get("NetworkWeight");
+            NetworkAutoItem.Content = Localization.Get("NetworkAuto");
+            NetworkNormalItem.Content = Localization.Get("NetworkNormal");
+            NetworkSemiboldItem.Content = Localization.Get("NetworkSemibold");
+            NetworkBoldItem.Content = Localization.Get("NetworkBold");
+            NetworkExtraBoldItem.Content = Localization.Get("NetworkExtraBold");
+            NetworkScaleLabel.Text = Localization.Get("NetworkScale");
+            NetworkOpacityLabel.Text = Localization.Get("OptOverlayOpacity");
+            NetworkBackgroundOpacityLabel.Text = Localization.Get("OptOverlayBgOpacity");
+            NetworkIntervalLabel.Text = Localization.Get("NetworkInterval");
+            NetworkPreviewButton.ToolTip = Localization.Get("NetworkTestTooltip");
+            NetworkResetPositionButton.Content = Localization.Get("BtnResetOverlay");
+            NetworkSaveButton.Content = SaveSettingsButton.Content;
+            UpdateNetworkSliderTexts();
+            networkOverlay.RefreshLanguage();
+        }
+
+        private void NetworkSlider_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (IsInitialized && !loadingDraft)
+                UpdateNetworkSliderTexts();
+            NetworkPreviewSettings_Changed(sender, e);
+        }
+
+        private void NetworkPreviewSettings_Changed(object sender, RoutedEventArgs e)
+        {
+            if (IsInitialized && !loadingDraft && networkOverlay.IsPreviewActive)
+                networkOverlay.UpdatePreview(ReadNetworkSettings());
+        }
+
+        private void UpdateNetworkSliderTexts()
+        {
+            NetworkScaleValue.Text = NetworkScaleSlider.Value + "%";
+            NetworkOpacityValue.Text = NetworkOpacitySlider.Value + "%";
+            NetworkBackgroundOpacityValue.Text = NetworkBackgroundOpacitySlider.Value + "%";
+            NetworkIntervalValue.Text = Localization.Format("NetworkSeconds", NetworkIntervalSlider.Value);
+        }
+
+        private NetworkOverlaySettings ReadNetworkSettings()
+        {
+            var saved = AppSettings.Instance.NetworkOverlay;
+            return new NetworkOverlaySettings
+            {
+                Enabled = NetworkEnabledCheck.IsChecked == true,
+                ShowRegion = NetworkShowRegionCheck.IsChecked == true,
+                ShowAddress = NetworkShowAddressCheck.IsChecked == true,
+                ShowFailedChecks = NetworkShowFailedChecksCheck.IsChecked == true,
+                HideZeroFailures = NetworkHideZeroFailuresCheck.IsChecked == true,
+                Compact = NetworkCompactCheck.IsChecked == true,
+                Locked = NetworkLockedCheck.IsChecked == true,
+                Region = (NetworkRegionCombo.SelectedItem as ComboBoxItem)?.Tag as string ?? "Auto",
+                Weight = NetworkWeightCombo.SelectedIndex,
+                Scale = (int)NetworkScaleSlider.Value,
+                Opacity = (int)NetworkOpacitySlider.Value,
+                BackgroundOpacity = (int)NetworkBackgroundOpacitySlider.Value,
+                Interval = (int)NetworkIntervalSlider.Value,
+                Left = saved.Left,
+                Top = saved.Top,
+                AttachedToReconnect = saved.AttachedToReconnect
+            };
+        }
+
+        private void NetworkPreview_Click(object sender, RoutedEventArgs e)
+        {
+            networkOverlay.TogglePreview(ReadNetworkSettings());
+        }
+
+        private void NetworkResetPosition_Click(object sender, RoutedEventArgs e)
+        {
+            networkOverlay.ResetPosition();
+        }
+
+        private void NetworkSave_Click(object sender, RoutedEventArgs e)
+        {
+            AppSettings.Instance.NetworkOverlay = ReadNetworkSettings();
+            AppSettings.Save();
+            networkOverlay.ApplySettings();
         }
 
         private void OnLanguageChanged()
@@ -438,6 +563,7 @@ namespace HS_Reconnector.UI
             s.ShowOverlayOnlyInMatch = OverlayOnlyMatchCheck.IsChecked == true;
             s.ShowOverlayOnlyWhenGameFocused = OverlayOnlyWhenFocusedCheck.IsChecked == true;
             s.LockOverlayPosition = LockOverlayCheck.IsChecked == true;
+            s.OverlayFontWeight = OverlayWeightCombo.SelectedIndex;
             s.UseMiniOverlay = MiniOverlayCheck.IsChecked == true;
             var oldScalePercent = s.OverlayScalePercent;
             var newScalePercent = (int)Math.Round(ScaleSlider.Value);
@@ -498,6 +624,7 @@ namespace HS_Reconnector.UI
             {
                 UseMiniOverlay = MiniOverlayCheck.IsChecked == true,
                 LockOverlayPosition = LockOverlayCheck.IsChecked == true,
+                OverlayFontWeight = OverlayWeightCombo.SelectedIndex,
                 OverlayOpacityPercent = (int)Math.Round(OpacitySlider.Value),
                 OverlayBackgroundOpacityPercent = (int)Math.Round(BgOpacitySlider.Value),
                 OverlayScalePercent = (int)Math.Round(ScaleSlider.Value),

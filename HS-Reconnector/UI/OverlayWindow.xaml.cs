@@ -53,6 +53,12 @@ namespace HS_Reconnector.UI
         private ControllerSnapshot lastSnapshot;
 
         public event Action ReconnectRequested;
+        internal event Action PositionCommitted;
+        internal event Action PositionUpdated;
+        internal Rect OverlayBounds => new Rect(Left, Top,
+            RootBorder.Width * OverlayScaleTransform.ScaleX, RootBorder.Height * OverlayScaleTransform.ScaleY);
+        internal static readonly FontWeight[] TextWeights =
+            { FontWeights.Normal, FontWeights.SemiBold, FontWeights.Bold, FontWeights.ExtraBold };
 
         public OverlayWindow()
         {
@@ -98,6 +104,7 @@ namespace HS_Reconnector.UI
             RootBorder.Width = settings.UseMiniOverlay ? MiniOverlayWidth : BaseOverlayWidth;
             RootBorder.Height = settings.UseMiniOverlay ? MiniOverlayHeight : BaseOverlayHeight;
             StatusViewbox.Margin = settings.UseMiniOverlay ? new Thickness(3) : new Thickness(13, 5, 13, 5);
+            StatusText.FontWeight = TextWeights[settings.OverlayFontWeight];
             Opacity = settings.OverlayOpacityPercent / 100.0;
             BackgroundPlate.Opacity = settings.OverlayBackgroundOpacityPercent / 100.0;
             var scale = settings.OverlayScalePercent / 100.0;
@@ -323,6 +330,7 @@ namespace HS_Reconnector.UI
 
             Left = Math.Max(minLeft, Math.Min(maxLeft, settings.OverlayLeft));
             Top = Math.Max(minTop, Math.Min(maxTop, settings.OverlayTop));
+            PositionUpdated?.Invoke();
         }
 
         private void RootBorder_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -372,6 +380,7 @@ namespace HS_Reconnector.UI
 
             Left = Math.Max(minLeft, Math.Min(maxLeft, dragStartWindow.X + dx));
             Top = Math.Max(minTop, Math.Min(maxTop, dragStartWindow.Y + dy));
+            PositionUpdated?.Invoke();
         }
 
         private void RootBorder_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
@@ -385,6 +394,7 @@ namespace HS_Reconnector.UI
             Appearance.OverlayTop = Top;
             AppSettings.Instance.OverlayLeft = Left;
             AppSettings.Instance.OverlayTop = Top;
+            PositionCommitted?.Invoke();
             AppSettings.Save();
             e.Handled = true;
         }

@@ -77,6 +77,7 @@
     <Compile Include="Core\HearthstoneLocator.cs" />
     <Compile Include="Core\HotkeyManager.cs" />
     <Compile Include="Core\Localization.cs" />
+    <Compile Include="Core\NetworkProbe.cs" />
     <Compile Include="Core\ReconnectController.cs" />
     <Compile Include="Core\Reconnector.cs" />
     <Compile Include="LogHandler\ConnectionLogHandler.cs" />
@@ -89,6 +90,7 @@
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </Compile>
     <Compile Include="UI\OutlinedTextBlock.cs" />
+    <Compile Include="UI\NetworkOverlayWindow.cs" />
     <Compile Include="UI\OverlayWindow.xaml.cs">
       <DependentUpon>OverlayWindow.xaml</DependentUpon>
     </Compile>
