@@ -1,7 +1,11 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Reflection;
 using System.Text;
 using System.Threading;
@@ -9,6 +13,7 @@ using System.Windows.Input;
 using System.Windows.Threading;
 using HS_Reconnector.Core;
 using HS_Reconnector.LogHandler;
+using HS_Reconnector.Native;
 
 class TestHarness
 {
@@ -90,6 +95,14 @@ class TestHarness
         Test("port 0 log entry invalidates cached IPv4", () =>
         {
             CheckUnsupportedEndpoint("203.0.113.20:0");
+        });
+
+        Test("bracketed IPv6 endpoint preserves port and invalidates IPv4", () =>
+        {
+            var handler = new ConnectionLogHandler();
+            Check(handler.TryExtractEndpoint("Network.GotoGameServe() address=[2001:db8::1]:3724",
+                out var host, out var port) && host == "2001:db8::1" && port == 3724, "bracketed IPv6 parsing failed");
+            CheckUnsupportedEndpoint("[2001:db8::1]:3724");
         });
 
         Test("EndGameScreen clears active endpoint", () =>
@@ -350,6 +363,27 @@ class TestHarness
                 Check(HearthstoneLocator.FindLatestLogFile(tempRoot, gameStarted) == null, "old session log was accepted");
                 File.SetLastWriteTimeUtc(expected, gameStarted);
                 Check(HearthstoneLocator.FindLatestLogFile(tempRoot, gameStarted) == expected, "current session log was rejected");
+
+                var unreadable = Directory.CreateDirectory(Path.Combine(tempRoot, "Logs", "Hearthstone_4_unreadable"));
+                var deniedAcl = unreadable.GetAccessControl();
+                FileSystemAccessRule denyList;
+                using (var identity = WindowsIdentity.GetCurrent())
+                    denyList = new FileSystemAccessRule(identity.User, FileSystemRights.ListDirectory, AccessControlType.Deny);
+                deniedAcl.AddAccessRule(denyList);
+                unreadable.SetAccessControl(deniedAcl);
+                try
+                {
+                    var accessDenied = false;
+                    try { unreadable.GetFiles("Hearthstone.log"); }
+                    catch (UnauthorizedAccessException) { accessDenied = true; }
+                    Check(accessDenied, "test directory not actually blocked");
+                    Check(HearthstoneLocator.FindLatestLogFile(tempRoot) == expected, "unreadable session masked valid log");
+                }
+                finally
+                {
+                    deniedAcl.RemoveAccessRuleSpecific(denyList);
+                    unreadable.SetAccessControl(deniedAcl);
+                }
             }
             finally
             {
@@ -360,6 +394,7 @@ class TestHarness
         Test("settings round trip preserves malformed XML before replacing it", () =>
         {
             var path = Path.GetTempFileName();
+            var originalMini = AppSettings.Instance.UseMiniOverlay;
             const string invalid = "<AppSettings><UseMiniOverlay>";
             try
             {
@@ -375,7 +410,29 @@ class TestHarness
             }
             finally
             {
+                AppSettings.Instance.UseMiniOverlay = originalMini;
                 foreach (var backup in Directory.GetFiles(Path.GetDirectoryName(path), Path.GetFileName(path) + ".*.corrupt"))
+                    File.Delete(backup);
+                File.Delete(path);
+            }
+        });
+
+        Test("settings preserve the original after a temporary sharing violation", () =>
+        {
+            var path = Path.GetTempFileName();
+            const string original = "<AppSettings><OverlayScalePercent>125</OverlayScalePercent></AppSettings>";
+            try
+            {
+                File.WriteAllText(path, original);
+                using (File.Open(path, FileMode.Open, FileAccess.Read, FileShare.None))
+                    AppSettings.Load(path);
+                AppSettings.Save(path);
+                var backup = Directory.GetFiles(Path.GetDirectoryName(path), Path.GetFileName(path) + ".*.unreadable");
+                Check(backup.Length == 1 && File.ReadAllText(backup[0]) == original, "unreadable settings were lost");
+            }
+            finally
+            {
+                foreach (var backup in Directory.GetFiles(Path.GetDirectoryName(path), Path.GetFileName(path) + ".*.unreadable"))
                     File.Delete(backup);
                 File.Delete(path);
             }
@@ -414,6 +471,61 @@ class TestHarness
                     "loopback connection was not measured");
             }
             finally { listener.Stop(); }
+        });
+
+        Test("reconnect selects only an established matching TCP row", () =>
+        {
+            var address = IPAddress.Parse("192.0.2.1");
+            const ushort port = 3724;
+            using (var process = Process.GetCurrentProcess())
+            {
+                var row = new Iphlpapi.MIB_TCPROW_OWNER_PID
+                {
+                    owningPid = (uint)process.Id,
+                    state = (uint)Iphlpapi.MIB_TCP_STATE.MIB_TCP_STATE_ESTAB,
+                    remoteAddr = BitConverter.ToUInt32(address.GetAddressBytes(), 0),
+                    remotePort = new byte[] { 0x0e, 0x8c, 0, 0 }
+                };
+                var otherPid = row;
+                otherPid.owningPid = 0;
+                var otherPort = row;
+                otherPort.remotePort = new byte[] { 0x8c, 0x0e, 0, 0 };
+                var otherState = row;
+                otherState.state = (uint)Iphlpapi.MIB_TCP_STATE.MIB_TCP_STATE_LISTEN;
+                var otherAddress = row;
+                otherAddress.remoteAddr = BitConverter.ToUInt32(IPAddress.Parse("192.0.2.2").GetAddressBytes(), 0);
+                var rows = new List<Iphlpapi.MIB_TCPROW_OWNER_PID> { otherPid, otherPort, otherState, otherAddress, row };
+                var select = typeof(Reconnector).GetMethod("FindMatchingTcpConnections", BindingFlags.NonPublic | BindingFlags.Static);
+                var args = new object[] { rows, new[] { process }, address, port, null };
+                Check((int)select.Invoke(null, args) == 1 && ((Iphlpapi.MIB_TCPROW_OWNER_PID)args[4]).RemotePort == port,
+                    "incorrect TCP row selection or remote port byte order");
+            }
+        });
+
+        Test("reconnect timeout and match end restore the controller state", () =>
+        {
+            const BindingFlags PrivateInstance = BindingFlags.NonPublic | BindingFlags.Instance;
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            using (var controller = new ReconnectController(dispatcher))
+            {
+                var type = typeof(ReconnectController);
+                var reconnector = (Reconnector)type.GetField("reconnector", PrivateInstance).GetValue(controller);
+                var pending = type.GetField("cooldownPendingAfterReconnect", PrivateInstance);
+                reconnector.Status = ConnectionStatus.Disconnected;
+                pending.SetValue(controller, true);
+                Check(controller.GetSnapshot().VisualState == ReconnectVisualState.Disconnected, "missing disconnected state");
+                type.GetMethod("DisconnectTimer_Tick", PrivateInstance).Invoke(controller, new object[] { null, EventArgs.Empty });
+                Check(controller.GetSnapshot().VisualState == ReconnectVisualState.Cooldown, "timeout did not enter cooldown");
+
+                reconnector.Status = ConnectionStatus.Disconnected;
+                pending.SetValue(controller, true);
+                controller.ClearRemoteEndpointForMatchEnd("synthetic match end");
+                var frame = new DispatcherFrame();
+                dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => frame.Continue = false));
+                Dispatcher.PushFrame(frame);
+                Check(reconnector.Status == ConnectionStatus.Connected
+                    && controller.GetSnapshot().VisualState == ReconnectVisualState.Waiting, "match end did not clear cooldown");
+            }
         });
 
         Console.WriteLine("Failures: " + failures);

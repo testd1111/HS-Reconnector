@@ -103,9 +103,16 @@ namespace HS_Reconnector.UI
                     tooltip = Localization.Format("TrayReady", snapshot.RemoteAddress + ":" + snapshot.RemotePort);
                     break;
                 case ReconnectVisualState.Disconnected:
-                case ReconnectVisualState.Cooldown:
                     targetIcon = disconnectedIcon;
                     tooltip = Localization.Get("TrayDisconnected");
+                    break;
+                case ReconnectVisualState.Cooldown:
+                    targetIcon = waitingIcon;
+                    tooltip = "HS-Reconnector — " + Localization.Format("BtnWait", snapshot.CooldownRemainingSeconds);
+                    break;
+                case ReconnectVisualState.Unsupported:
+                    targetIcon = waitingIcon;
+                    tooltip = "HS-Reconnector — " + Localization.Get("OverlayUnsupported");
                     break;
                 default:
                     targetIcon = waitingIcon;

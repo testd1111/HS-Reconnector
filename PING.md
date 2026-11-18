@@ -12,6 +12,8 @@ The network overlay is off by default. Open **Ping & Region**, enable **Show in-
 - **Region** comes from the current Hearthstone log in Auto mode. The overlay displays EU, US, ASIA or CHINA. If the log has no supported region marker, the value is shown as a dash and you can select a region manually.
 - **Failed TCP checks** shows the percentage of failed connection attempts among the last 10 checks. This measures failed checks. Actual packet loss on the game connection is a separate metric.
 
+Each check opens and closes a TCP connection. At the default interval, that is up to 20 attempts per minute while the overlay is active. A gaming accelerator may route the game and the probe differently, so the displayed latency may differ from the game's connection.
+
 ## Appearance and position
 
 Choose compact or multiline layout, font weight, text scale, overlay opacity and background opacity. You can also show the server address and hide failed checks at 0%.

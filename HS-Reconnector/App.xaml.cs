@@ -98,12 +98,13 @@ namespace HS_Reconnector
                 trayIcon?.UpdateState(controller.GetSnapshot());
             };
 
-            if (!controller.Start())
+            var hotkeyReady = controller.Start();
+            if (!hotkeyReady)
                 mainWindow.ShowHotkeyError(AppSettings.Instance.HotkeyModifiers, AppSettings.Instance.Hotkey);
             overlayWindow.ApplySettingsAndPosition();
             startupCompleted = true;
 
-            if (!AppSettings.Instance.StartMinimizedToTray)
+            if (!AppSettings.Instance.StartMinimizedToTray || !hotkeyReady)
                 mainWindow.Show();
         }
 

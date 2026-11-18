@@ -85,7 +85,7 @@ namespace HS_Reconnector.UI
             };
             SourceInitialized += OverlayWindow_SourceInitialized;
             Loaded += (s, e) => ApplySettingsAndPosition();
-            RootBorder.LostMouseCapture += (s, e) => isDragging = false;
+            RootBorder.LostMouseCapture += (s, e) => CancelDrag();
         }
 
         private void OverlayWindow_SourceInitialized(object sender, EventArgs e)
@@ -271,9 +271,9 @@ namespace HS_Reconnector.UI
             }
         }
 
-        public void AdjustPositionForScaleChange(int oldScalePercent, int newScalePercent)
+        public void AdjustPositionForSizeChange(bool oldMini, int oldScalePercent, bool newMini, int newScalePercent)
         {
-            if (oldScalePercent == newScalePercent)
+            if (oldMini == newMini && oldScalePercent == newScalePercent)
                 return;
 
             var settings = AppSettings.Instance;
@@ -282,12 +282,10 @@ namespace HS_Reconnector.UI
 
             var oldScale = oldScalePercent / 100.0;
             var newScale = newScalePercent / 100.0;
-            var width = settings.UseMiniOverlay ? MiniOverlayWidth : BaseOverlayWidth;
-            var height = settings.UseMiniOverlay ? MiniOverlayHeight : BaseOverlayHeight;
-            var oldWidth = width * oldScale;
-            var oldHeight = height * oldScale;
-            var newWidth = width * newScale;
-            var newHeight = height * newScale;
+            var oldWidth = (oldMini ? MiniOverlayWidth : BaseOverlayWidth) * oldScale;
+            var oldHeight = (oldMini ? MiniOverlayHeight : BaseOverlayHeight) * oldScale;
+            var newWidth = (newMini ? MiniOverlayWidth : BaseOverlayWidth) * newScale;
+            var newHeight = (newMini ? MiniOverlayHeight : BaseOverlayHeight) * newScale;
 
             var minLeft = SystemParameters.VirtualScreenLeft;
             var minTop = SystemParameters.VirtualScreenTop;
@@ -397,6 +395,16 @@ namespace HS_Reconnector.UI
             PositionCommitted?.Invoke();
             AppSettings.Save();
             e.Handled = true;
+        }
+
+        private void CancelDrag()
+        {
+            if (!isDragging)
+                return;
+            isDragging = false;
+            Left = dragStartWindow.X;
+            Top = dragStartWindow.Y;
+            PositionUpdated?.Invoke();
         }
 
         private void RootBorder_MouseEnter(object sender, MouseEventArgs e)

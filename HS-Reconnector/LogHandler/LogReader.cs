@@ -28,6 +28,7 @@ namespace HS_Reconnector.LogHandler
         private readonly long initialEventOffset;
         private readonly byte[] initialEventBytes;
         private readonly byte[] pendingLineBytes = new byte[MaxPendingLineBytes];
+        private readonly byte[] buffer = new byte[ReadBufferSize];
         private readonly ManualResetEvent stopEvent = new ManualResetEvent(false);
         private readonly byte[] headFingerprint = new byte[HeadFingerprintSize];
         private readonly byte[] tailFingerprint = new byte[TailFingerprintSize];
@@ -229,7 +230,6 @@ namespace HS_Reconnector.LogHandler
 
                 fs.Seek(offset, SeekOrigin.Begin);
                 var bytesToRead = (int)Math.Min(available, ReadBufferSize);
-                var buffer = new byte[bytesToRead];
                 var read = fs.Read(buffer, 0, buffer.Length);
                 if (read <= 0)
                     return false;

@@ -98,21 +98,34 @@ namespace HS_Reconnector.Core
             if (!Directory.Exists(logRoot))
                 return null;
 
-            foreach (var dir in new DirectoryInfo(logRoot)
-                .EnumerateDirectories()
-                .OrderByDescending(d => d.CreationTimeUtc))
+            DirectoryInfo[] sessions;
+            try
             {
-                var logFile = dir
-                    .EnumerateFiles(LogSearchPattern)
-                    .Where(f => f.LastWriteTimeUtc >= notBeforeUtc)
-                    .OrderByDescending(f => f.LastWriteTimeUtc)
-                    .FirstOrDefault();
-                if (logFile != null)
-                    return logFile.FullName;
+                sessions = new DirectoryInfo(logRoot).GetDirectories();
+            }
+            catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
+
+            foreach (var dir in sessions.OrderByDescending(d => d.CreationTimeUtc))
+            {
+                try
+                {
+                    var logFile = dir.EnumerateFiles(LogSearchPattern)
+                        .FirstOrDefault(f => f.Exists && f.LastWriteTimeUtc >= notBeforeUtc);
+                    if (logFile != null)
+                        return logFile.FullName;
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
             }
 
             var directLog = Path.Combine(logRoot, LogSearchPattern);
-            return File.Exists(directLog) && File.GetLastWriteTimeUtc(directLog) >= notBeforeUtc ? directLog : null;
+            try
+            {
+                return File.Exists(directLog) && File.GetLastWriteTimeUtc(directLog) >= notBeforeUtc ? directLog : null;
+            }
+            catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
         }
 
         private static string TryFindFromRunningProcess()

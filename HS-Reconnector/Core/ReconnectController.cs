@@ -145,16 +145,17 @@ namespace HS_Reconnector.Core
             return hotkeyApplied;
         }
 
-        public void SuspendHotkey(bool suspend)
+        public bool SuspendHotkey(bool suspend)
         {
             if (hotkeySuspended == suspend)
-                return;
+                return true;
 
             hotkeySuspended = suspend;
-            if (suspend)
-                hotkeyManager.Unregister();
-            else
-                ApplySettings();
+            if (!suspend)
+                return ApplySettings();
+
+            hotkeyManager.Unregister();
+            return true;
         }
 
         public void ExecuteReconnect()
@@ -408,6 +409,9 @@ namespace HS_Reconnector.Core
                 NotifyStateChanged();
             }
 
+            if (reconnector.Status == ConnectionStatus.Connected)
+                RefreshTcpCountAsync();
+
             if (isRunning && !logWatcherStartInProgress)
             {
                 if (!hasRunningWatcher && DateTime.UtcNow >= nextLogSearchUtc)
@@ -416,8 +420,6 @@ namespace HS_Reconnector.Core
                     CheckForNewerLogFile();
             }
 
-            if (reconnector.Status == ConnectionStatus.Connected)
-                RefreshTcpCountAsync();
         }
 
         private void TryStartLogWatcher()

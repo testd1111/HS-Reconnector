@@ -19,7 +19,7 @@ namespace HS_Reconnector.Core
     public sealed class AppSettings
     {
         private static AppSettings _instance;
-        private static bool preserveInvalidSettings;
+        private static string recoveryBackupSuffix;
         private static readonly object Sync = new object();
 
         public static string DataDirectory =>
@@ -75,24 +75,24 @@ namespace HS_Reconnector.Core
             {
                 try
                 {
-                    if (File.Exists(settingsPath))
+                    var serializer = new XmlSerializer(typeof(AppSettings));
+                    using (var stream = File.OpenRead(settingsPath))
                     {
-                        var serializer = new XmlSerializer(typeof(AppSettings));
-                        using (var stream = File.OpenRead(settingsPath))
-                        {
-                            if (serializer.Deserialize(stream) is AppSettings loaded)
-                                _instance = loaded;
-                            preserveInvalidSettings = false;
-                        }
+                        if (serializer.Deserialize(stream) is AppSettings loaded)
+                            _instance = loaded;
+                        recoveryBackupSuffix = null;
                     }
                 }
+                catch (FileNotFoundException) { recoveryBackupSuffix = null; }
+                catch (DirectoryNotFoundException) { recoveryBackupSuffix = null; }
                 catch (InvalidOperationException ex)
                 {
-                    preserveInvalidSettings = true;
+                    recoveryBackupSuffix = ".corrupt";
                     AppLogger.Error("Could not deserialize settings: " + ex.Message);
                 }
                 catch (Exception ex)
                 {
+                    recoveryBackupSuffix = ".unreadable";
                     AppLogger.Error("Failed to load settings: " + ex.Message);
                 }
 
@@ -112,9 +112,8 @@ namespace HS_Reconnector.Core
                     Directory.CreateDirectory(Path.GetDirectoryName(settingsPath));
                     var serializer = new XmlSerializer(typeof(AppSettings));
                     var tempPath = settingsPath + ".tmp";
-                    var backupPath = preserveInvalidSettings
-                        ? settingsPath + "." + Guid.NewGuid().ToString("N") + ".corrupt"
-                        : settingsPath + ".bak";
+                    var backupPath = recoveryBackupSuffix == null ? settingsPath + ".bak"
+                        : settingsPath + "." + Guid.NewGuid().ToString("N") + recoveryBackupSuffix;
                     using (var stream = File.Create(tempPath))
                     {
                         serializer.Serialize(stream, Instance);
@@ -122,14 +121,14 @@ namespace HS_Reconnector.Core
                     if (File.Exists(settingsPath))
                     {
                         File.Replace(tempPath, settingsPath, backupPath, true);
-                        if (!preserveInvalidSettings)
+                        if (recoveryBackupSuffix == null)
                             TryDeleteFile(backupPath);
                     }
                     else
                     {
                         File.Move(tempPath, settingsPath);
                     }
-                    preserveInvalidSettings = false;
+                    recoveryBackupSuffix = null;
                 }
                 catch (Exception ex)
                 {

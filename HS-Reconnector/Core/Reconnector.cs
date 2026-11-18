@@ -34,10 +34,7 @@ namespace HS_Reconnector.Core
             try
             {
                 if (!TryGetReconnectTcp(addr, port, out var hsTcpRow))
-                {
-                    AppLogger.Error("No exact established Hearthstone TCP connection found.");
                     return false;
-                }
 
                 hsTcpRow.state = (uint)Iphlpapi.MIB_TCP_STATE.MIB_TCP_STATE_DELETE_TCB;
                 hsTcpRowPtr = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(Iphlpapi.MIB_TCPROW)));

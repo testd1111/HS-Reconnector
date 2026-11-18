@@ -564,6 +564,7 @@ namespace HS_Reconnector.UI
             s.ShowOverlayOnlyWhenGameFocused = OverlayOnlyWhenFocusedCheck.IsChecked == true;
             s.LockOverlayPosition = LockOverlayCheck.IsChecked == true;
             s.OverlayFontWeight = OverlayWeightCombo.SelectedIndex;
+            var oldMini = s.UseMiniOverlay;
             s.UseMiniOverlay = MiniOverlayCheck.IsChecked == true;
             var oldScalePercent = s.OverlayScalePercent;
             var newScalePercent = (int)Math.Round(ScaleSlider.Value);
@@ -580,7 +581,7 @@ namespace HS_Reconnector.UI
             s.Language = selectedLang;
 
             s.Normalize();
-            overlayWindow.AdjustPositionForScaleChange(oldScalePercent, s.OverlayScalePercent);
+            overlayWindow.AdjustPositionForSizeChange(oldMini, oldScalePercent, s.UseMiniOverlay, s.OverlayScalePercent);
 
             if (!controller.ApplySettings())
             {
@@ -692,7 +693,8 @@ namespace HS_Reconnector.UI
 
         private void HotkeyBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
         {
-            controller.SuspendHotkey(false);
+            if (!controller.SuspendHotkey(false))
+                ShowHotkeyError(AppSettings.Instance.HotkeyModifiers, AppSettings.Instance.Hotkey);
             HotkeyBox.Text = FormatHotkey(draftModifiers, draftHotkey);
         }
 

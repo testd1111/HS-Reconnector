@@ -26,7 +26,6 @@ namespace HS_Reconnector.UI
         private const int WsExTransparent = 0x20;
         private const double SnapDistance = 16;
         private const double OverlayGap = 4;
-        private static readonly FontFamily PingDigitsFont = new FontFamily("Consolas");
         private readonly OverlayWindow reconnectOverlay;
         private ControllerSnapshot snapshot;
         private NetworkOverlaySettings preview;
@@ -72,7 +71,7 @@ namespace HS_Reconnector.UI
             plate.MouseRightButtonDown += StartDrag;
             plate.MouseMove += MoveDrag;
             plate.MouseRightButtonUp += EndDrag;
-            plate.LostMouseCapture += (sender, args) => dragOrigin = null;
+            plate.LostMouseCapture += (sender, args) => CancelDrag();
             Closed += (sender, args) =>
             {
                 closed = true;
@@ -253,6 +252,8 @@ namespace HS_Reconnector.UI
             if (settings.ShowAddress)
                 parts.Add(sample ? "192.0.2.1:1119" : snapshot.RemoteAddress + ":" + snapshot.RemotePort);
 
+            text.FontSize = 13 * settings.Scale / 100.0;
+            text.FontWeight = OverlayWindow.TextWeights[settings.Weight];
             DrawPing(ms, settings.Compact);
             for (var i = 0; i < parts.Count; i++)
             {
@@ -261,8 +262,6 @@ namespace HS_Reconnector.UI
             }
             text.Foreground = !ms.HasValue ? Brushes.LightGray : ms.Value >= 300 ? Brushes.LightCoral
                 : ms.Value >= 100 ? Brushes.Gold : Brushes.LightGreen;
-            text.FontSize = 13 * settings.Scale / 100.0;
-            text.FontWeight = OverlayWindow.TextWeights[settings.Weight];
             Opacity = settings.Opacity / 100.0;
             plate.Background = new SolidColorBrush(Color.FromArgb((byte)(255 * settings.BackgroundOpacity / 100), 14, 16, 19));
             if (!IsVisible)
@@ -285,12 +284,26 @@ namespace HS_Reconnector.UI
             var number = milliseconds.HasValue
                 ? Math.Min(999, milliseconds.Value).ToString(CultureInfo.InvariantCulture)
                 : "—";
-            if (number.Length < 3)
-                text.Inlines.Add(new Run(new string('0', 3 - number.Length))
-                    { FontFamily = PingDigitsFont, Foreground = Brushes.Transparent });
-            text.Inlines.Add(new Run(number) { FontFamily = PingDigitsFont });
-            if (milliseconds.HasValue)
-                text.Inlines.Add(new Run(" " + Localization.Get("NetworkMilliseconds")));
+            var typeface = new Typeface(text.FontFamily, text.FontStyle, text.FontWeight, text.FontStretch);
+            var pixelsPerDip = VisualTreeHelper.GetDpi(text).PixelsPerDip;
+            var widestDigit = 0.0;
+            for (var digit = 0; digit <= 9; digit++)
+                widestDigit = Math.Max(widestDigit, MeasurePingText(digit.ToString(CultureInfo.InvariantCulture), typeface, pixelsPerDip));
+
+            var padding = Math.Max(0, 3 * widestDigit - MeasurePingText(number, typeface, pixelsPerDip));
+            if (padding > 0)
+                text.Inlines.Add(new InlineUIContainer(new Border { Width = padding, Height = 0 }));
+            text.Inlines.Add(new Run(number));
+            var unit = new Run(" " + Localization.Get("NetworkMilliseconds"));
+            if (!milliseconds.HasValue)
+                unit.Foreground = Brushes.Transparent;
+            text.Inlines.Add(unit);
+        }
+
+        private double MeasurePingText(string number, Typeface typeface, double pixelsPerDip)
+        {
+            return new FormattedText(number, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
+                typeface, text.FontSize, Brushes.Transparent, pixelsPerDip).WidthIncludingTrailingWhitespace;
         }
 
         private static long? GetSampleLatency(int phase)
@@ -381,6 +394,7 @@ namespace HS_Reconnector.UI
         {
             if (!dragOrigin.HasValue)
                 return;
+            dragOrigin = null;
             plate.ReleaseMouseCapture();
             Settings.Left = Left;
             Settings.Top = Top;
@@ -394,6 +408,17 @@ namespace HS_Reconnector.UI
                 RestartPreviewTimer();
             AppSettings.Save();
             e.Handled = true;
+        }
+
+        private void CancelDrag()
+        {
+            if (!dragOrigin.HasValue)
+                return;
+            dragOrigin = null;
+            if (Settings.AttachedToReconnect)
+                PlaceAboveReconnect();
+            else
+                Place(windowOrigin.X, windowOrigin.Y);
         }
     }
 }
