@@ -1,6 +1,6 @@
 # HS-Reconnector
 
-[**English**](README.md) · [**Скачать для Windows x64**](https://github.com/testd1111/HS-Reconnector/releases/latest)
+[**English**](README.md) · [**Скачать для Windows x64**](https://github.com/testd1111/HS-Reconnector/releases/latest) · [**SHOW PING**](PING.ru.md)
 
 Отдельная программа для Windows, которая позволяет переподключиться к текущему матчу Hearthstone по горячей клавише или кнопкой поверх игры.
 

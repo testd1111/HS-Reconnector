@@ -1,6 +1,6 @@
 # HS-Reconnector
 
-[**Русский**](README.ru.md) · [**Download for Windows x64**](https://github.com/testd1111/HS-Reconnector/releases/latest)
+[**Русский**](README.ru.md) · [**Download for Windows x64**](https://github.com/testd1111/HS-Reconnector/releases/latest) · [**SHOW PING**](PING.md)
 
 A standalone Windows app for reconnecting to your current Hearthstone match with a hotkey or an in-game button.
 
