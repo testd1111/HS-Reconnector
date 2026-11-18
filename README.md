@@ -19,3 +19,7 @@ Requires Windows 10 (1803+) or Windows 11, x64. The app detects Hearthstone auto
 [Build and test instructions](BUILD_AND_INSTALL.md)
 
 [MIT License](LICENSE)
+
+## Download
+
+[![Latest release](https://img.shields.io/github/v/release/testd1111/HS-Reconnector?style=flat&label=release&color=007ec6)](https://github.com/testd1111/HS-Reconnector/releases/latest) [![Total downloads](https://img.shields.io/github/downloads/testd1111/HS-Reconnector/total?style=flat&label=downloads&color=a4a61d)](https://github.com/testd1111/HS-Reconnector/releases)
