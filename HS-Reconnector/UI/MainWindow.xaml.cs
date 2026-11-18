@@ -218,6 +218,7 @@ namespace HS_Reconnector.UI
                 OverlayOnlyMatchCheck.IsChecked = s.ShowOverlayOnlyInMatch;
                 OverlayOnlyWhenFocusedCheck.IsChecked = s.ShowOverlayOnlyWhenGameFocused;
                 LockOverlayCheck.IsChecked = s.LockOverlayPosition;
+                MiniOverlayCheck.IsChecked = s.UseMiniOverlay;
                 OpacitySlider.Value = s.OverlayOpacityPercent;
                 BgOpacitySlider.Value = s.OverlayBackgroundOpacityPercent;
                 ScaleSlider.Value = s.OverlayScalePercent;
@@ -261,6 +262,8 @@ namespace HS_Reconnector.UI
             OverlayOnlyMatchCheck.Content = Localization.Get("OptOverlayOnlyMatch");
             OverlayOnlyWhenFocusedCheck.Content = Localization.Get("OptOverlayOnlyWhenFocused");
             LockOverlayCheck.Content = Localization.Get("OptLockOverlay");
+            MiniOverlayCheck.Content = Localization.Get("OptMiniOverlay");
+            TestOverlayButton.ToolTip = Localization.Get("OverlayTestTooltip");
             OptOpacityLabel.Text = Localization.Get("OptOverlayOpacity");
             OptBgOpacityLabel.Text = Localization.Get("OptOverlayBgOpacity");
             OptScaleLabel.Text = Localization.Get("OptOverlayScale");
@@ -331,8 +334,23 @@ namespace HS_Reconnector.UI
 
         private void Sliders_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
-            if (!loadingDraft && IsInitialized)
-                UpdateSliderTexts();
+            if (loadingDraft || !IsInitialized)
+                return;
+
+            UpdateSliderTexts();
+            if (sender != TimeoutSlider)
+                RefreshOverlayPreview();
+        }
+
+        private void OverlayCheck_Changed(object sender, RoutedEventArgs e)
+        {
+            RefreshOverlayPreview();
+        }
+
+        private void RefreshOverlayPreview()
+        {
+            if (!loadingDraft && overlayWindow?.IsPreviewActive == true)
+                overlayWindow.UpdatePreviewSettings(ReadOverlayPreviewSettings());
         }
 
         private void UpdateSliderTexts()
@@ -403,6 +421,7 @@ namespace HS_Reconnector.UI
 
         private void SaveSettingsButton_Click(object sender, RoutedEventArgs e)
         {
+            overlayWindow.StopPreview();
             var s = AppSettings.Instance;
             var previousHotkey = s.Hotkey;
             var previousModifiers = s.HotkeyModifiers;
@@ -417,6 +436,7 @@ namespace HS_Reconnector.UI
             s.ShowOverlayOnlyInMatch = OverlayOnlyMatchCheck.IsChecked == true;
             s.ShowOverlayOnlyWhenGameFocused = OverlayOnlyWhenFocusedCheck.IsChecked == true;
             s.LockOverlayPosition = LockOverlayCheck.IsChecked == true;
+            s.UseMiniOverlay = MiniOverlayCheck.IsChecked == true;
             var oldScalePercent = s.OverlayScalePercent;
             var newScalePercent = (int)Math.Round(ScaleSlider.Value);
             s.OverlayOpacityPercent = (int)Math.Round(OpacitySlider.Value);
@@ -459,12 +479,28 @@ namespace HS_Reconnector.UI
 
         private void ResetOverlayButton_Click(object sender, RoutedEventArgs e)
         {
-            var scale = AppSettings.Instance.OverlayScalePercent / 100.0;
-            var width = 176 * scale;
-            var height = 46 * scale;
-            AppSettings.Instance.ResetOverlayPosition(width, height);
+            overlayWindow.StopPreview();
+            overlayWindow.ResetPosition();
             AppSettings.Save();
             overlayWindow.ApplySettingsAndPosition();
+        }
+
+        private void TestOverlayButton_Click(object sender, RoutedEventArgs e)
+        {
+            overlayWindow.TogglePreview(ReadOverlayPreviewSettings());
+        }
+
+        private AppSettings ReadOverlayPreviewSettings()
+        {
+            return new AppSettings
+            {
+                UseMiniOverlay = MiniOverlayCheck.IsChecked == true,
+                LockOverlayPosition = LockOverlayCheck.IsChecked == true,
+                OverlayOpacityPercent = (int)Math.Round(OpacitySlider.Value),
+                OverlayBackgroundOpacityPercent = (int)Math.Round(BgOpacitySlider.Value),
+                OverlayScalePercent = (int)Math.Round(ScaleSlider.Value),
+                ReconnectCooldownSeconds = (int)Math.Round(CooldownSlider.Value)
+            };
         }
 
         private void BrowseHsButton_Click(object sender, RoutedEventArgs e)

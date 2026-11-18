@@ -35,7 +35,8 @@
                         BorderBrush="#4E555E"
                         BorderThickness="1" />
             </Border>
-            <Viewbox Margin="13,5"
+            <Viewbox x:Name="StatusViewbox"
+                     Margin="13,5"
                      Stretch="Uniform"
                      StretchDirection="DownOnly"
                      HorizontalAlignment="Center"

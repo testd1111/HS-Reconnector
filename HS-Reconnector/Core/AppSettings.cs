@@ -35,6 +35,7 @@ namespace HS_Reconnector.Core
         public bool ShowOverlayOnlyInMatch { get; set; } = false;
         public bool ShowOverlayOnlyWhenGameFocused { get; set; } = true;
         public bool LockOverlayPosition { get; set; } = false;
+        public bool UseMiniOverlay { get; set; }
         public int OverlayOpacityPercent { get; set; } = 95;
         public int OverlayBackgroundOpacityPercent { get; set; } = 100;
         public int OverlayScalePercent { get; set; } = 100;

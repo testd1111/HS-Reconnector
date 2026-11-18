@@ -1,4 +1,6 @@
 using System;
+using System.Diagnostics;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -14,6 +16,8 @@ namespace HS_Reconnector.UI
     {
         private const double BaseOverlayWidth = 176;
         private const double BaseOverlayHeight = 46;
+        private const double MiniOverlayWidth = 30;
+        private const double MiniOverlayHeight = 28;
 
         private static readonly Brush ReadyBg = CreateFrozenBrush(0xFF, 0x23, 0x27, 0x2D);
         private static readonly Brush HoverBg = CreateFrozenBrush(0xFF, 0x2E, 0x34, 0x3C);
@@ -35,6 +39,11 @@ namespace HS_Reconnector.UI
         }
 
         private readonly DispatcherTimer foregroundTimer;
+        private readonly DispatcherTimer previewTimer;
+        private readonly Stopwatch previewAnimation = new Stopwatch();
+        private AppSettings previewSettings;
+        private AppSettings Appearance => previewSettings ?? AppSettings.Instance;
+        internal bool IsPreviewActive => previewSettings != null;
         private bool isGameInForeground;
         private bool isDragging;
         private bool isHovered;
@@ -60,7 +69,13 @@ namespace HS_Reconnector.UI
                     UpdateVisibilityAndVisuals();
                 }
             };
-            Closed += (s, e) => foregroundTimer.Stop();
+            previewTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher);
+            previewTimer.Tick += PreviewTimer_Tick;
+            Closed += (s, e) =>
+            {
+                foregroundTimer.Stop();
+                previewTimer.Stop();
+            };
             SourceInitialized += OverlayWindow_SourceInitialized;
             Loaded += (s, e) => ApplySettingsAndPosition();
             RootBorder.LostMouseCapture += (s, e) => isDragging = false;
@@ -78,20 +93,83 @@ namespace HS_Reconnector.UI
 
         public void ApplySettingsAndPosition()
         {
-            var settings = AppSettings.Instance;
+            var settings = Appearance;
+            RootBorder.Width = settings.UseMiniOverlay ? MiniOverlayWidth : BaseOverlayWidth;
+            RootBorder.Height = settings.UseMiniOverlay ? MiniOverlayHeight : BaseOverlayHeight;
+            StatusViewbox.Margin = settings.UseMiniOverlay ? new Thickness(3) : new Thickness(13, 5, 13, 5);
             Opacity = settings.OverlayOpacityPercent / 100.0;
             BackgroundPlate.Opacity = settings.OverlayBackgroundOpacityPercent / 100.0;
             var scale = settings.OverlayScalePercent / 100.0;
             OverlayScaleTransform.ScaleX = scale;
             OverlayScaleTransform.ScaleY = scale;
 
-            RootBorder.ToolTip = settings.LockOverlayPosition
+            RootBorder.ToolTip = previewSettings != null ? null : settings.LockOverlayPosition
                 ? Localization.Get("OverlayTooltipLocked")
                 : Localization.Get("OverlayTooltip");
 
             EnsureValidPosition();
             UpdateForegroundTracking();
             UpdateVisibilityAndVisuals();
+        }
+
+        internal void TogglePreview(AppSettings draft)
+        {
+            if (previewSettings == null)
+            {
+                UpdatePreviewSettings(draft);
+            }
+            else if (!previewAnimation.IsRunning)
+            {
+                previewTimer.Stop();
+                previewAnimation.Start();
+                previewTimer.Interval = TimeSpan.FromMilliseconds(100);
+                previewTimer.Start();
+                UpdateVisibilityAndVisuals();
+            }
+            else
+            {
+                StopPreview();
+            }
+        }
+
+        internal void UpdatePreviewSettings(AppSettings draft)
+        {
+            draft.OverlayLeft = Appearance.OverlayLeft;
+            draft.OverlayTop = Appearance.OverlayTop;
+            if (previewAnimation.IsRunning)
+                draft.ReconnectCooldownSeconds = previewSettings.ReconnectCooldownSeconds;
+            previewSettings = draft;
+
+            if (!previewAnimation.IsRunning)
+            {
+                previewTimer.Stop();
+                previewTimer.Interval = TimeSpan.FromSeconds(20);
+                previewTimer.Start();
+            }
+
+            ApplySettingsAndPosition();
+        }
+
+        private void PreviewTimer_Tick(object sender, EventArgs e)
+        {
+            if (!previewAnimation.IsRunning
+                || previewAnimation.Elapsed.TotalSeconds >= 1 + previewSettings.ReconnectCooldownSeconds)
+                StopPreview();
+            else
+                UpdateVisibilityAndVisuals();
+        }
+
+        internal void StopPreview()
+        {
+            if (previewSettings == null)
+                return;
+
+            previewTimer.Stop();
+            previewAnimation.Reset();
+            previewSettings = null;
+            if (isDragging)
+                RootBorder.ReleaseMouseCapture();
+            ApplySettingsAndPosition();
         }
 
         internal void UpdateState(ControllerSnapshot snapshot)
@@ -113,55 +191,64 @@ namespace HS_Reconnector.UI
         private void UpdateVisibilityAndVisuals()
         {
             var settings = AppSettings.Instance;
-            if (!settings.EnableOverlay || lastSnapshot == null || !lastSnapshot.IsHearthstoneRunning
-                || (settings.ShowOverlayOnlyWhenGameFocused && !isGameInForeground))
+            ReconnectVisualState visualState;
+            int seconds;
+            if (previewSettings != null)
             {
-                if (IsVisible)
-                    Hide();
-                return;
+                var elapsed = previewAnimation.Elapsed.TotalSeconds;
+                visualState = !previewAnimation.IsRunning ? ReconnectVisualState.Ready
+                    : elapsed < 1 ? ReconnectVisualState.Disconnected : ReconnectVisualState.Cooldown;
+                seconds = Math.Max(1, (int)Math.Ceiling(1 + previewSettings.ReconnectCooldownSeconds - elapsed));
+            }
+            else
+            {
+                var hasActiveMatch = lastSnapshot != null && (lastSnapshot.EndpointUnsupported
+                    || (!string.IsNullOrWhiteSpace(lastSnapshot.RemoteAddress) && lastSnapshot.RemotePort != 0));
+                if (!settings.EnableOverlay || lastSnapshot?.IsHearthstoneRunning != true
+                    || (settings.ShowOverlayOnlyWhenGameFocused && !isGameInForeground)
+                    || (settings.ShowOverlayOnlyInMatch && !hasActiveMatch))
+                {
+                    if (IsVisible)
+                        Hide();
+                    return;
+                }
+                visualState = lastSnapshot.VisualState;
+                seconds = lastSnapshot.CooldownRemainingSeconds;
             }
 
-            var hasActiveMatch = lastSnapshot.EndpointUnsupported
-                || (!string.IsNullOrWhiteSpace(lastSnapshot.RemoteAddress) && lastSnapshot.RemotePort != 0);
-            if (settings.ShowOverlayOnlyInMatch && !hasActiveMatch)
-            {
-                if (IsVisible)
-                    Hide();
-                return;
-            }
-
-            switch (lastSnapshot.VisualState)
+            var mini = Appearance.UseMiniOverlay;
+            switch (visualState)
             {
                 case ReconnectVisualState.Ready:
-                    StatusText.Text = Localization.Get("BtnReconnect");
+                    StatusText.Text = mini ? "R" : Localization.Get("BtnReconnect");
                     InnerBorder.Background = isHovered ? HoverBg : ReadyBg;
                     InnerBorder.BorderBrush = isHovered ? HoverBorder : ReadyBorder;
                     StatusText.Fill = ReadyText;
-                    RootBorder.Cursor = Cursors.Hand;
+                    RootBorder.Cursor = previewSettings == null ? Cursors.Hand : Cursors.Arrow;
                     break;
                 case ReconnectVisualState.Disconnected:
-                    StatusText.Text = Localization.Get("BtnDisconnected");
+                    StatusText.Text = mini ? "D" : Localization.Get("BtnDisconnected");
                     InnerBorder.Background = IdleBg;
                     InnerBorder.BorderBrush = DisconnectedBorder;
                     StatusText.Fill = DisconnectedText;
                     RootBorder.Cursor = Cursors.Arrow;
                     break;
                 case ReconnectVisualState.Cooldown:
-                    StatusText.Text = Localization.Format("BtnWait", lastSnapshot.CooldownRemainingSeconds);
+                    StatusText.Text = mini ? seconds.ToString(CultureInfo.InvariantCulture) : Localization.Format("BtnWait", seconds);
                     InnerBorder.Background = IdleBg;
                     InnerBorder.BorderBrush = IdleBorder;
                     StatusText.Fill = CooldownText;
                     RootBorder.Cursor = Cursors.Arrow;
                     break;
                 case ReconnectVisualState.Unsupported:
-                    StatusText.Text = Localization.Get("OverlayUnsupported");
+                    StatusText.Text = mini ? "–" : Localization.Get("OverlayUnsupported");
                     InnerBorder.Background = IdleBg;
                     InnerBorder.BorderBrush = IdleBorder;
                     StatusText.Fill = MutedText;
                     RootBorder.Cursor = Cursors.Arrow;
                     break;
                 default:
-                    StatusText.Text = Localization.Get("BtnReconnect");
+                    StatusText.Text = mini ? "R" : Localization.Get("BtnReconnect");
                     InnerBorder.Background = IdleBg;
                     InnerBorder.BorderBrush = IdleBorder;
                     StatusText.Fill = MutedText;
@@ -187,10 +274,12 @@ namespace HS_Reconnector.UI
 
             var oldScale = oldScalePercent / 100.0;
             var newScale = newScalePercent / 100.0;
-            var oldWidth = BaseOverlayWidth * oldScale;
-            var oldHeight = BaseOverlayHeight * oldScale;
-            var newWidth = BaseOverlayWidth * newScale;
-            var newHeight = BaseOverlayHeight * newScale;
+            var width = settings.UseMiniOverlay ? MiniOverlayWidth : BaseOverlayWidth;
+            var height = settings.UseMiniOverlay ? MiniOverlayHeight : BaseOverlayHeight;
+            var oldWidth = width * oldScale;
+            var oldHeight = height * oldScale;
+            var newWidth = width * newScale;
+            var newHeight = height * newScale;
 
             var minLeft = SystemParameters.VirtualScreenLeft;
             var minTop = SystemParameters.VirtualScreenTop;
@@ -209,13 +298,20 @@ namespace HS_Reconnector.UI
             settings.OverlayTop = Math.Max(minTop, Math.Min(newMaxTop, centerY - newHeight / 2.0));
         }
 
-        private void EnsureValidPosition()
+        public void ResetPosition()
         {
             var settings = AppSettings.Instance;
             var scale = settings.OverlayScalePercent / 100.0;
-            var width = BaseOverlayWidth * scale;
-            var height = BaseOverlayHeight * scale;
+            settings.ResetOverlayPosition(
+                (settings.UseMiniOverlay ? MiniOverlayWidth : BaseOverlayWidth) * scale,
+                (settings.UseMiniOverlay ? MiniOverlayHeight : BaseOverlayHeight) * scale);
+        }
 
+        private void EnsureValidPosition()
+        {
+            var settings = Appearance;
+            var width = RootBorder.Width * OverlayScaleTransform.ScaleX;
+            var height = RootBorder.Height * OverlayScaleTransform.ScaleY;
             if (double.IsNaN(settings.OverlayLeft) || double.IsNaN(settings.OverlayTop))
                 settings.ResetOverlayPosition(width, height);
 
@@ -230,13 +326,13 @@ namespace HS_Reconnector.UI
 
         private void RootBorder_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
-            if (lastSnapshot != null && lastSnapshot.CanReconnect)
+            if (previewSettings == null && lastSnapshot?.CanReconnect == true)
                 ReconnectRequested?.Invoke();
         }
 
         private void RootBorder_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
         {
-            if (AppSettings.Instance.LockOverlayPosition)
+            if (Appearance.LockOverlayPosition)
                 return;
 
             isDragging = true;
@@ -259,9 +355,8 @@ namespace HS_Reconnector.UI
             var dx = (currentScreen.X - dragStartScreen.X) * dpiX;
             var dy = (currentScreen.Y - dragStartScreen.Y) * dpiY;
 
-            var scale = AppSettings.Instance.OverlayScalePercent / 100.0;
-            var width = BaseOverlayWidth * scale;
-            var height = BaseOverlayHeight * scale;
+            var width = RootBorder.Width * OverlayScaleTransform.ScaleX;
+            var height = RootBorder.Height * OverlayScaleTransform.ScaleY;
             var minLeft = SystemParameters.VirtualScreenLeft;
             var minTop = SystemParameters.VirtualScreenTop;
             var maxLeft = Math.Max(minLeft, minLeft + SystemParameters.VirtualScreenWidth - width);
@@ -278,6 +373,8 @@ namespace HS_Reconnector.UI
 
             isDragging = false;
             RootBorder.ReleaseMouseCapture();
+            Appearance.OverlayLeft = Left;
+            Appearance.OverlayTop = Top;
             AppSettings.Instance.OverlayLeft = Left;
             AppSettings.Instance.OverlayTop = Top;
             AppSettings.Save();

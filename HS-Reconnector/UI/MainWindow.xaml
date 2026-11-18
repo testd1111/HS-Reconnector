@@ -280,7 +280,7 @@
 
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock x:Name="HeaderTitle" Text="HS-Reconnector" FontSize="18" FontWeight="Bold" />
-                <TextBlock x:Name="VersionText" Text="v0.0.12" FontSize="12" Foreground="#7E8C9F" Margin="8,4,0,0" />
+                <TextBlock x:Name="VersionText" Text="v0.0.13" FontSize="12" Foreground="#7E8C9F" Margin="8,4,0,0" />
             </StackPanel>
 
             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
@@ -419,7 +419,8 @@
                             <CheckBox x:Name="EnableOverlayCheck" Content="Show floating in-game overlay button" />
                             <CheckBox x:Name="OverlayOnlyMatchCheck" Content="Show overlay only when match endpoint is active" />
                             <CheckBox x:Name="OverlayOnlyWhenFocusedCheck" Content="Show overlay only when Hearthstone is in focus" />
-                            <CheckBox x:Name="LockOverlayCheck" Content="Lock overlay position (prevent right-drag)" Margin="0,4,0,10" />
+                            <CheckBox x:Name="MiniOverlayCheck" Content="Use compact overlay button" Checked="OverlayCheck_Changed" Unchecked="OverlayCheck_Changed" />
+                            <CheckBox x:Name="LockOverlayCheck" Content="Lock overlay position (prevent right-drag)" Margin="0,4,0,10" Checked="OverlayCheck_Changed" Unchecked="OverlayCheck_Changed" />
 
                             <Grid Margin="0,0,0,10">
                                 <Grid.ColumnDefinitions>
@@ -454,10 +455,13 @@
                                 <TextBlock x:Name="ScaleValueText" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="#4CC2FF" FontWeight="SemiBold" />
                             </Grid>
 
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,4,0,0">
-                                <Button x:Name="ResetOverlayButton" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ResetOverlayButton_Click" Content="Reset Overlay Pos" />
-                                <Button x:Name="SaveSettingsButton" Style="{StaticResource PrimaryButton}" Click="SaveSettingsButton_Click" Content="Save &amp; Apply" />
-                            </StackPanel>
+                            <DockPanel Margin="0,4,0,0">
+                                <Button x:Name="TestOverlayButton" DockPanel.Dock="Left" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="TestOverlayButton_Click" Content="TEST" />
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                    <Button x:Name="ResetOverlayButton" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Click="ResetOverlayButton_Click" Content="Reset Overlay Pos" />
+                                    <Button x:Name="SaveSettingsButton" Style="{StaticResource PrimaryButton}" Click="SaveSettingsButton_Click" Content="Save &amp; Apply" />
+                                </StackPanel>
+                            </DockPanel>
                         </StackPanel>
                     </ScrollViewer>
                 </Border>
