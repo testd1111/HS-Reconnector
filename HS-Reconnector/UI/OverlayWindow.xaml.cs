@@ -44,8 +44,12 @@ namespace HS_Reconnector.UI
         private AppSettings previewSettings;
         private AppSettings Appearance => previewSettings ?? AppSettings.Instance;
         internal bool IsPreviewActive => previewSettings != null;
+        internal bool IsSnapEnabled => Appearance.SnapOverlays;
         private bool isGameInForeground;
         private bool isDragging;
+        private bool draggedDuringPreview;
+        private bool draggedPreviewMini;
+        private int draggedPreviewScale;
         private bool isHovered;
         private bool reconnectPressed;
         private Point dragStartScreen;
@@ -167,6 +171,15 @@ namespace HS_Reconnector.UI
                 UpdateVisibilityAndVisuals();
         }
 
+        internal void GetEffectivePositionSize(ref bool oldMini, ref int oldScalePercent)
+        {
+            if (!draggedDuringPreview)
+                return;
+
+            oldMini = draggedPreviewMini;
+            oldScalePercent = draggedPreviewScale;
+        }
+
         internal void StopPreview()
         {
             if (previewSettings == null)
@@ -175,6 +188,7 @@ namespace HS_Reconnector.UI
             previewTimer.Stop();
             previewAnimation.Reset();
             previewSettings = null;
+            draggedDuringPreview = false;
             if (isDragging)
                 RootBorder.ReleaseMouseCapture();
             ApplySettingsAndPosition();
@@ -216,6 +230,8 @@ namespace HS_Reconnector.UI
                     || (settings.ShowOverlayOnlyWhenGameFocused && !isGameInForeground)
                     || (settings.ShowOverlayOnlyInMatch && !hasActiveMatch))
                 {
+                    if (isDragging)
+                        RootBorder.ReleaseMouseCapture();
                     if (IsVisible)
                         Hide();
                     return;
@@ -306,6 +322,7 @@ namespace HS_Reconnector.UI
 
         public void ResetPosition()
         {
+            draggedDuringPreview = false;
             var settings = AppSettings.Instance;
             var scale = settings.OverlayScalePercent / 100.0;
             settings.ResetOverlayPosition(
@@ -392,6 +409,16 @@ namespace HS_Reconnector.UI
             Appearance.OverlayTop = Top;
             AppSettings.Instance.OverlayLeft = Left;
             AppSettings.Instance.OverlayTop = Top;
+            if (previewSettings != null)
+            {
+                draggedDuringPreview = true;
+                draggedPreviewMini = previewSettings.UseMiniOverlay;
+                draggedPreviewScale = previewSettings.OverlayScalePercent;
+            }
+            else
+            {
+                draggedDuringPreview = false;
+            }
             PositionCommitted?.Invoke();
             AppSettings.Save();
             e.Handled = true;

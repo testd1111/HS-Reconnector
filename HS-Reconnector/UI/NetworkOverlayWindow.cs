@@ -29,6 +29,7 @@ namespace HS_Reconnector.UI
         private readonly OverlayWindow reconnectOverlay;
         private ControllerSnapshot snapshot;
         private NetworkOverlaySettings preview;
+        private bool? previewSnapOverlays;
         private DateTime previewUntil;
         private DateTime? simulationStarted;
         private int simulationPhase;
@@ -38,11 +39,14 @@ namespace HS_Reconnector.UI
         private long? latency;
         private bool checking;
         private bool closed;
+        private bool hasRendered;
         private int generation;
         private Point? dragOrigin;
         private Point windowOrigin;
 
         private NetworkOverlaySettings Settings => preview ?? AppSettings.Instance.NetworkOverlay;
+        private bool IsSnapEnabled => previewSnapOverlays
+            ?? (reconnectOverlay.IsPreviewActive ? reconnectOverlay.IsSnapEnabled : AppSettings.Instance.SnapOverlays);
 
         public NetworkOverlayWindow(OverlayWindow reconnectOverlay)
         {
@@ -99,10 +103,13 @@ namespace HS_Reconnector.UI
             Refresh(true);
         }
 
-        public void TogglePreview(NetworkOverlaySettings draft)
+        public void TogglePreview(NetworkOverlaySettings draft, bool snapOverlays)
         {
             if (preview == null)
             {
+                previewSnapOverlays = snapOverlays;
+                if (!snapOverlays)
+                    DetachFromReconnect(draft);
                 preview = draft;
                 RestartPreviewTimer();
             }
@@ -121,16 +128,78 @@ namespace HS_Reconnector.UI
         private void ClearPreview()
         {
             preview = null;
+            previewSnapOverlays = null;
             simulationStarted = null;
             simulationPhase = 0;
         }
 
         public bool IsPreviewActive => preview != null;
 
-        public void UpdatePreview(NetworkOverlaySettings draft)
+        public void UpdatePreview(NetworkOverlaySettings draft, bool snapOverlays)
         {
+            previewSnapOverlays = snapOverlays;
+            if (!snapOverlays)
+            {
+                if (preview != null && !preview.AttachedToReconnect
+                    && !double.IsNaN(preview.Left) && !double.IsNaN(preview.Top))
+                {
+                    draft.Left = preview.Left;
+                    draft.Top = preview.Top;
+                    draft.AttachedToReconnect = false;
+                }
+                else
+                {
+                    DetachFromReconnect(draft);
+                }
+            }
+            else if (preview != null && preview.AttachedToReconnect)
+            {
+                draft.AttachedToReconnect = true;
+            }
             preview = draft;
             RestartPreviewTimer();
+            Refresh(true);
+        }
+
+        public void DetachFromReconnect(NetworkOverlaySettings target)
+        {
+            if (target == null || !target.AttachedToReconnect)
+                return;
+
+            target.AttachedToReconnect = false;
+            if (preview != null && !preview.AttachedToReconnect
+                && !double.IsNaN(preview.Left) && !double.IsNaN(preview.Top))
+            {
+                target.Left = ClampLeft(preview.Left);
+                target.Top = ClampTop(preview.Top);
+            }
+            else if (IsVisible && !double.IsNaN(Left) && !double.IsNaN(Top))
+            {
+                target.Left = ClampLeft(Left);
+                target.Top = ClampTop(Top);
+            }
+            else if (hasRendered && TryGetAttachedPosition(out var left, out var top))
+            {
+                target.Left = left;
+                target.Top = top;
+            }
+            else
+            {
+                target.Left = double.NaN;
+                target.Top = double.NaN;
+            }
+        }
+
+        public void ApplySnapSetting()
+        {
+            if (!AppSettings.Instance.SnapOverlays)
+                DetachFromReconnect(AppSettings.Instance.NetworkOverlay);
+            if (preview != null)
+            {
+                previewSnapOverlays = AppSettings.Instance.SnapOverlays;
+                if (!AppSettings.Instance.SnapOverlays)
+                    DetachFromReconnect(preview);
+            }
             Refresh(true);
         }
 
@@ -146,15 +215,15 @@ namespace HS_Reconnector.UI
         {
             var saved = AppSettings.Instance.NetworkOverlay;
             saved.Left = saved.Top = double.NaN;
-            saved.AttachedToReconnect = true;
+            saved.AttachedToReconnect = AppSettings.Instance.SnapOverlays;
             if (preview != null)
             {
                 preview.Left = preview.Top = double.NaN;
-                preview.AttachedToReconnect = true;
+                preview.AttachedToReconnect = IsSnapEnabled;
                 RestartPreviewTimer();
             }
-            AppSettings.Save();
             Refresh(true);
+            AppSettings.Save();
         }
 
         private void ResetMeasurement()
@@ -190,6 +259,8 @@ namespace HS_Reconnector.UI
             timer.IsEnabled = active || preview != null;
             if (preview == null && (!active || !HearthstoneLocator.IsHearthstoneInForeground()))
             {
+                if (dragOrigin.HasValue)
+                    plate.ReleaseMouseCapture();
                 if (IsVisible)
                     Hide();
                 return;
@@ -228,6 +299,10 @@ namespace HS_Reconnector.UI
                 if (history.Count > 10)
                     history.Dequeue();
             }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Network overlay probe failed: " + ex.Message);
+            }
             finally
             {
                 checking = false;
@@ -264,17 +339,20 @@ namespace HS_Reconnector.UI
                 : ms.Value >= 100 ? Brushes.Gold : Brushes.LightGreen;
             Opacity = settings.Opacity / 100.0;
             plate.Background = new SolidColorBrush(Color.FromArgb((byte)(255 * settings.BackgroundOpacity / 100), 14, 16, 19));
-            if (!IsVisible)
-                Show();
-            UpdateClickThrough();
             if (dragOrigin == null)
             {
                 plate.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-                if (settings.AttachedToReconnect)
+                hasRendered = plate.DesiredSize.Width > 0 && plate.DesiredSize.Height > 0;
+                if (IsSnapEnabled && settings.AttachedToReconnect)
                     PlaceAboveReconnect();
+                else if (double.IsNaN(settings.Left) || double.IsNaN(settings.Top))
+                    PlaceInitialDetached(settings);
                 else
                     Place(settings.Left, settings.Top);
             }
+            if (!IsVisible)
+                Show();
+            UpdateClickThrough();
         }
 
         private void DrawPing(long? milliseconds, bool compact)
@@ -318,20 +396,56 @@ namespace HS_Reconnector.UI
 
         private void ReconnectPositionChanged()
         {
-            if (IsVisible && Settings.AttachedToReconnect && dragOrigin == null)
+            if (IsVisible && IsSnapEnabled && Settings.AttachedToReconnect && dragOrigin == null)
                 PlaceAboveReconnect();
+        }
+
+        private bool TryGetAttachedPosition(out double left, out double top)
+        {
+            var anchor = reconnectOverlay.OverlayBounds;
+            if (double.IsNaN(anchor.Left) || double.IsNaN(anchor.Top))
+            {
+                left = double.NaN;
+                top = double.NaN;
+                return false;
+            }
+
+            var candidateTop = anchor.Top - plate.DesiredSize.Height - OverlayGap;
+            if (candidateTop < SystemParameters.VirtualScreenTop)
+                candidateTop = anchor.Bottom + OverlayGap;
+            left = ClampLeft(anchor.Left);
+            top = ClampTop(candidateTop);
+            return true;
+        }
+
+        private void PlaceDefault(out double left, out double top)
+        {
+            var workArea = SystemParameters.WorkArea;
+            left = ClampLeft(Math.Max(workArea.Left, workArea.Right - plate.DesiredSize.Width - 24));
+            top = ClampTop(Math.Max(workArea.Top, workArea.Bottom - plate.DesiredSize.Height - 114));
+            Place(left, top);
+        }
+
+        private void PlaceInitialDetached(NetworkOverlaySettings target)
+        {
+            double left;
+            double top;
+            if (TryGetAttachedPosition(out left, out top))
+                Place(left, top);
+            else
+                PlaceDefault(out left, out top);
+
+            target.Left = left;
+            target.Top = top;
+            target.AttachedToReconnect = false;
         }
 
         private void PlaceAboveReconnect()
         {
-            var anchor = reconnectOverlay.OverlayBounds;
-            if (double.IsNaN(anchor.Left) || double.IsNaN(anchor.Top))
-                return;
-
-            var top = anchor.Top - plate.DesiredSize.Height - OverlayGap;
-            if (top < SystemParameters.VirtualScreenTop)
-                top = anchor.Bottom + OverlayGap;
-            Place(anchor.Left, top);
+            if (TryGetAttachedPosition(out var left, out var top))
+                Place(left, top);
+            else
+                PlaceDefault(out _, out _);
         }
 
         private bool NearReconnect()
@@ -345,29 +459,44 @@ namespace HS_Reconnector.UI
 
         private void SnapAfterReconnectMove()
         {
-            if (!IsVisible || Settings.AttachedToReconnect || !NearReconnect())
+            if (!IsVisible || !IsSnapEnabled || Settings.AttachedToReconnect || !NearReconnect())
                 return;
 
             Settings.AttachedToReconnect = true;
-            AppSettings.Instance.NetworkOverlay.AttachedToReconnect = true;
+            if (AppSettings.Instance.SnapOverlays)
+                AppSettings.Instance.NetworkOverlay.AttachedToReconnect = true;
             PlaceAboveReconnect();
         }
 
         private void UpdateClickThrough()
         {
             var hwnd = new WindowInteropHelper(this).Handle;
+            if (hwnd == IntPtr.Zero)
+                return;
             var oldStyle = Win32.GetWindowLong(hwnd, Win32.GWL_EXSTYLE);
             var style = Settings.Locked ? oldStyle | WsExTransparent : oldStyle & ~WsExTransparent;
             if (style != oldStyle)
                 Win32.SetWindowLong(hwnd, Win32.GWL_EXSTYLE, style);
         }
 
-        private void Place(double left, double top)
+        private double ClampLeft(double left)
         {
             var minLeft = SystemParameters.VirtualScreenLeft;
+            var maxLeft = Math.Max(minLeft, minLeft + SystemParameters.VirtualScreenWidth - plate.DesiredSize.Width);
+            return Math.Max(minLeft, Math.Min(maxLeft, left));
+        }
+
+        private double ClampTop(double top)
+        {
             var minTop = SystemParameters.VirtualScreenTop;
-            Left = Math.Max(minLeft, Math.Min(minLeft + SystemParameters.VirtualScreenWidth - plate.DesiredSize.Width, left));
-            Top = Math.Max(minTop, Math.Min(minTop + SystemParameters.VirtualScreenHeight - plate.DesiredSize.Height, top));
+            var maxTop = Math.Max(minTop, minTop + SystemParameters.VirtualScreenHeight - plate.DesiredSize.Height);
+            return Math.Max(minTop, Math.Min(maxTop, top));
+        }
+
+        private void Place(double left, double top)
+        {
+            Left = ClampLeft(left);
+            Top = ClampTop(top);
         }
 
         private void StartDrag(object sender, MouseButtonEventArgs e)
@@ -386,7 +515,9 @@ namespace HS_Reconnector.UI
             if (!dragOrigin.HasValue)
                 return;
             var delta = PointToScreen(e.GetPosition(this)) - dragOrigin.Value;
-            var dips = PresentationSource.FromVisual(this).CompositionTarget.TransformFromDevice.Transform(delta);
+            var source = PresentationSource.FromVisual(this);
+            var target = source?.CompositionTarget;
+            var dips = target != null ? target.TransformFromDevice.Transform(delta) : delta;
             Place(windowOrigin.X + dips.X, windowOrigin.Y + dips.Y);
         }
 
@@ -401,8 +532,10 @@ namespace HS_Reconnector.UI
             var saved = AppSettings.Instance.NetworkOverlay;
             saved.Left = Left;
             saved.Top = Top;
-            Settings.AttachedToReconnect = saved.AttachedToReconnect = NearReconnect();
-            if (saved.AttachedToReconnect)
+            var attach = IsSnapEnabled && NearReconnect();
+            Settings.AttachedToReconnect = attach;
+            saved.AttachedToReconnect = AppSettings.Instance.SnapOverlays && attach;
+            if (attach)
                 PlaceAboveReconnect();
             if (preview != null)
                 RestartPreviewTimer();
@@ -415,7 +548,7 @@ namespace HS_Reconnector.UI
             if (!dragOrigin.HasValue)
                 return;
             dragOrigin = null;
-            if (Settings.AttachedToReconnect)
+            if (IsSnapEnabled && Settings.AttachedToReconnect)
                 PlaceAboveReconnect();
             else
                 Place(windowOrigin.X, windowOrigin.Y);

@@ -111,7 +111,7 @@ namespace HS_Reconnector.Core
                 try
                 {
                     var logFile = dir.EnumerateFiles(LogSearchPattern)
-                        .FirstOrDefault(f => f.Exists && f.LastWriteTimeUtc >= notBeforeUtc);
+                        .FirstOrDefault(f => f.Exists && (f.LastWriteTimeUtc >= notBeforeUtc || f.CreationTimeUtc >= notBeforeUtc));
                     if (logFile != null)
                         return logFile.FullName;
                 }
@@ -122,7 +122,10 @@ namespace HS_Reconnector.Core
             var directLog = Path.Combine(logRoot, LogSearchPattern);
             try
             {
-                return File.Exists(directLog) && File.GetLastWriteTimeUtc(directLog) >= notBeforeUtc ? directLog : null;
+                return File.Exists(directLog)
+                    && (File.GetLastWriteTimeUtc(directLog) >= notBeforeUtc || File.GetCreationTimeUtc(directLog) >= notBeforeUtc)
+                    ? directLog
+                    : null;
             }
             catch (IOException) { return null; }
             catch (UnauthorizedAccessException) { return null; }

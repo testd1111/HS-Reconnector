@@ -18,6 +18,6 @@ Each check opens and closes a TCP connection. At the default interval, that is u
 
 Choose compact or multiline layout, font weight, text scale, overlay opacity and background opacity. You can also show the server address and hide failed checks at 0%.
 
-The overlay starts above the reconnect button and follows it when moved. Unlock its position and right-drag to detach it. Move either overlay close to the other to snap them together again. **Reset Overlay Pos** restores the attached position.
+The overlay starts above the reconnect button and follows it when moved. Unlock its position and right-drag to detach it. Move either overlay close to the other to snap them together again, or disable **Snap Ping and Reconnect overlays together** on either overlay tab to keep them independent. **Reset Overlay Pos** restores the default position above the reconnect button.
 
 Press **TEST** once for a 20-second preview. Adjustments update the preview and restart the timer. Press it again to simulate high latency, a failed check and recovery. Press it a third time to stop the simulation. TEST uses sample data.

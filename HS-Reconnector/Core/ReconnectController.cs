@@ -384,16 +384,27 @@ namespace HS_Reconnector.Core
                 nextLogSearchUtc = DateTime.UtcNow;
                 NotifyStateChanged();
             }
+            else if (isRunning && gameRunObserved
+                && startedAtUtc != DateTime.MinValue
+                && gameStartedAtUtc != DateTime.MinValue
+                && startedAtUtc != gameStartedAtUtc)
+            {
+                gameStartedAtUtc = startedAtUtc;
+                AppLogger.Info("Hearthstone process restarted.");
+                StopWatcher();
+                ResetDisconnectAndCooldownState();
+                ClearEndpoint("Hearthstone restarted");
+                ResetLogSearchBackoff();
+                nextLogSearchUtc = DateTime.UtcNow;
+                NotifyStateChanged();
+            }
             else if (!isRunning && gameRunObserved)
             {
                 gameRunObserved = false;
+                gameStartedAtUtc = DateTime.MinValue;
                 AppLogger.Info("Hearthstone process closed.");
                 StopWatcher();
-                disconnectTimer.Stop();
-                connectionRestoreTimer.Stop();
-                cooldownPendingAfterReconnect = false;
-                if (reconnector.Status == ConnectionStatus.Disconnected)
-                    reconnector.ResumeConnect();
+                ResetDisconnectAndCooldownState();
                 ClearEndpoint("Hearthstone stopped");
                 ResetLogSearchBackoff();
                 nextLogSearchUtc = DateTime.MinValue;
@@ -509,6 +520,7 @@ namespace HS_Reconnector.Core
             {
                 if (!disposed && ReferenceEquals(logWatcher, watcher))
                 {
+                    logWatcherStartInProgress = false;
                     if (started)
                     {
                         hasRunningWatcher = true;
@@ -524,10 +536,11 @@ namespace HS_Reconnector.Core
                 }
                 else
                 {
+                    if (logWatcher == null)
+                        logWatcherStartInProgress = false;
                     watcher.Stop();
                 }
 
-                logWatcherStartInProgress = false;
                 NotifyStateChanged();
             }
         }
@@ -546,7 +559,22 @@ namespace HS_Reconnector.Core
             logWatcher?.Stop();
             logWatcher = null;
             hasRunningWatcher = false;
+            logWatcherStartInProgress = false;
             activeLogPath = null;
+        }
+
+        private void ResetDisconnectAndCooldownState()
+        {
+            disconnectTimer.Stop();
+            connectionRestoreTimer.Stop();
+            cooldownTimer.Stop();
+            cooldownPendingAfterReconnect = false;
+            cooldownEndsAtUtc = DateTime.MinValue;
+            Interlocked.Increment(ref reconnectAttemptId);
+            reconnectRemoteAddr = null;
+            reconnectRemotePort = 0;
+            if (reconnector.Status == ConnectionStatus.Disconnected)
+                reconnector.ResumeConnect();
         }
 
         private async void ConnectionRestoreTimer_Tick(object sender, EventArgs e)
@@ -691,6 +719,10 @@ namespace HS_Reconnector.Core
                 }
                 if (changed)
                     NotifyStateChanged();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("TCP status check failed: " + ex.Message);
             }
             finally
             {

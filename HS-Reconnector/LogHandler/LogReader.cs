@@ -230,7 +230,7 @@ namespace HS_Reconnector.LogHandler
 
                 fs.Seek(offset, SeekOrigin.Begin);
                 var bytesToRead = (int)Math.Min(available, ReadBufferSize);
-                var read = fs.Read(buffer, 0, buffer.Length);
+                var read = fs.Read(buffer, 0, bytesToRead);
                 if (read <= 0)
                     return false;
 

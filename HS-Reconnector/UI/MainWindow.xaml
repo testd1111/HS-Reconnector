@@ -420,7 +420,8 @@
                             <CheckBox x:Name="OverlayOnlyMatchCheck" Content="Show overlay only when match endpoint is active" />
                             <CheckBox x:Name="OverlayOnlyWhenFocusedCheck" Content="Show overlay only when Hearthstone is in focus" />
                             <CheckBox x:Name="MiniOverlayCheck" Content="Use compact overlay button" Checked="OverlayCheck_Changed" Unchecked="OverlayCheck_Changed" />
-                            <CheckBox x:Name="LockOverlayCheck" Content="Lock overlay position (prevent right-drag)" Margin="0,4,0,10" Checked="OverlayCheck_Changed" Unchecked="OverlayCheck_Changed" />
+                            <CheckBox x:Name="LockOverlayCheck" Content="Lock overlay position (prevent right-drag)" Checked="OverlayCheck_Changed" Unchecked="OverlayCheck_Changed" />
+                            <CheckBox x:Name="SnapOverlaysCheck" Content="Snap Ping and Reconnect overlays together" Margin="0,4,0,10" Checked="SnapOverlaysCheck_Changed" Unchecked="SnapOverlaysCheck_Changed" />
 
                             <Grid Margin="0,0,0,10">
                                 <Grid.ColumnDefinitions>
@@ -525,6 +526,7 @@
                             <CheckBox x:Name="NetworkHideZeroFailuresCheck" Checked="NetworkPreviewSettings_Changed" Unchecked="NetworkPreviewSettings_Changed" />
                             <CheckBox x:Name="NetworkCompactCheck" Checked="NetworkPreviewSettings_Changed" Unchecked="NetworkPreviewSettings_Changed" />
                             <CheckBox x:Name="NetworkLockedCheck" Checked="NetworkPreviewSettings_Changed" Unchecked="NetworkPreviewSettings_Changed" />
+                            <CheckBox x:Name="NetworkSnapOverlaysCheck" Checked="SnapOverlaysCheck_Changed" Unchecked="SnapOverlaysCheck_Changed" />
                             <WrapPanel Margin="0,8,0,8">
                                 <TextBlock x:Name="NetworkRegionLabel" VerticalAlignment="Center" Margin="0,0,8,0" />
                                 <ComboBox x:Name="NetworkRegionCombo" MinWidth="150" Margin="0,0,20,0" SelectionChanged="NetworkPreviewSettings_Changed">

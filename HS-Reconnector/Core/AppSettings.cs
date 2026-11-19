@@ -39,6 +39,7 @@ namespace HS_Reconnector.Core
         public bool ShowOverlayOnlyInMatch { get; set; } = false;
         public bool ShowOverlayOnlyWhenGameFocused { get; set; } = true;
         public bool LockOverlayPosition { get; set; } = false;
+        public bool SnapOverlays { get; set; } = true;
         public bool UseMiniOverlay { get; set; }
         public int OverlayOpacityPercent { get; set; } = 95;
         public int OverlayBackgroundOpacityPercent { get; set; } = 100;
@@ -155,6 +156,8 @@ namespace HS_Reconnector.Core
         {
             NetworkOverlay = NetworkOverlay ?? new NetworkOverlaySettings();
             NetworkOverlay.Normalize();
+            if (!SnapOverlays)
+                NetworkOverlay.AttachedToReconnect = false;
             ReconnectCooldownSeconds = Clamp(ReconnectCooldownSeconds, 0, 10);
             DisconnectTimeoutSeconds = Clamp(DisconnectTimeoutSeconds, 5, 60);
             OverlayOpacityPercent = Clamp(OverlayOpacityPercent, 15, 100);

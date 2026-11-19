@@ -222,12 +222,13 @@ namespace HS_Reconnector.UI
                 OverlayOnlyMatchCheck.IsChecked = s.ShowOverlayOnlyInMatch;
                 OverlayOnlyWhenFocusedCheck.IsChecked = s.ShowOverlayOnlyWhenGameFocused;
                 LockOverlayCheck.IsChecked = s.LockOverlayPosition;
+                SnapOverlaysCheck.IsChecked = s.SnapOverlays;
                 MiniOverlayCheck.IsChecked = s.UseMiniOverlay;
                 OpacitySlider.Value = s.OverlayOpacityPercent;
                 BgOpacitySlider.Value = s.OverlayBackgroundOpacityPercent;
                 ScaleSlider.Value = s.OverlayScalePercent;
                 OverlayWeightCombo.SelectedIndex = s.OverlayFontWeight;
-                LoadNetworkSettings(s.NetworkOverlay);
+                LoadNetworkSettings(s.NetworkOverlay, s.SnapOverlays);
 
                 MinimizeToTrayCheck.IsChecked = s.MinimizeToTrayOnClose;
                 MinimizeToTrayOnMinimizeCheck.IsChecked = s.MinimizeToTrayOnMinimize;
@@ -268,6 +269,7 @@ namespace HS_Reconnector.UI
             OverlayOnlyMatchCheck.Content = Localization.Get("OptOverlayOnlyMatch");
             OverlayOnlyWhenFocusedCheck.Content = Localization.Get("OptOverlayOnlyWhenFocused");
             LockOverlayCheck.Content = Localization.Get("OptLockOverlay");
+            SnapOverlaysCheck.Content = Localization.Get("OptSnapOverlays");
             OverlayWeightLabel.Text = Localization.Get("NetworkWeight");
             OverlayNormalItem.Content = Localization.Get("NetworkNormal");
             OverlaySemiboldItem.Content = Localization.Get("NetworkSemibold");
@@ -315,7 +317,7 @@ namespace HS_Reconnector.UI
             UpdateState(controller.GetSnapshot());
         }
 
-        private void LoadNetworkSettings(NetworkOverlaySettings settings)
+        private void LoadNetworkSettings(NetworkOverlaySettings settings, bool snapOverlays)
         {
             NetworkEnabledCheck.IsChecked = settings.Enabled;
             NetworkShowRegionCheck.IsChecked = settings.ShowRegion;
@@ -324,6 +326,7 @@ namespace HS_Reconnector.UI
             NetworkHideZeroFailuresCheck.IsChecked = settings.HideZeroFailures;
             NetworkCompactCheck.IsChecked = settings.Compact;
             NetworkLockedCheck.IsChecked = settings.Locked;
+            NetworkSnapOverlaysCheck.IsChecked = snapOverlays;
             foreach (ComboBoxItem option in NetworkRegionCombo.Items)
             {
                 if (string.Equals(option.Tag as string, settings.Region, StringComparison.Ordinal))
@@ -350,6 +353,7 @@ namespace HS_Reconnector.UI
             NetworkHideZeroFailuresCheck.Content = Localization.Get("NetworkHideZero");
             NetworkCompactCheck.Content = Localization.Get("NetworkCompact");
             NetworkLockedCheck.Content = Localization.Get("NetworkLocked");
+            NetworkSnapOverlaysCheck.Content = Localization.Get("OptSnapOverlays");
             NetworkRegionLabel.Text = Localization.Get("NetworkRegion");
             NetworkWeightLabel.Text = Localization.Get("NetworkWeight");
             NetworkAutoItem.Content = Localization.Get("NetworkAuto");
@@ -378,7 +382,7 @@ namespace HS_Reconnector.UI
         private void NetworkPreviewSettings_Changed(object sender, RoutedEventArgs e)
         {
             if (IsInitialized && !loadingDraft && networkOverlay.IsPreviewActive)
-                networkOverlay.UpdatePreview(ReadNetworkSettings());
+                networkOverlay.UpdatePreview(ReadNetworkSettings(), NetworkSnapOverlaysCheck.IsChecked == true);
         }
 
         private void UpdateNetworkSliderTexts()
@@ -392,7 +396,7 @@ namespace HS_Reconnector.UI
         private NetworkOverlaySettings ReadNetworkSettings()
         {
             var saved = AppSettings.Instance.NetworkOverlay;
-            return new NetworkOverlaySettings
+            var settings = new NetworkOverlaySettings
             {
                 Enabled = NetworkEnabledCheck.IsChecked == true,
                 ShowRegion = NetworkShowRegionCheck.IsChecked == true,
@@ -411,11 +415,15 @@ namespace HS_Reconnector.UI
                 Top = saved.Top,
                 AttachedToReconnect = saved.AttachedToReconnect
             };
+            settings.Normalize();
+            if (!AppSettings.Instance.SnapOverlays && !(NetworkSnapOverlaysCheck.IsChecked == true))
+                settings.AttachedToReconnect = false;
+            return settings;
         }
 
         private void NetworkPreview_Click(object sender, RoutedEventArgs e)
         {
-            networkOverlay.TogglePreview(ReadNetworkSettings());
+            networkOverlay.TogglePreview(ReadNetworkSettings(), NetworkSnapOverlaysCheck.IsChecked == true);
         }
 
         private void NetworkResetPosition_Click(object sender, RoutedEventArgs e)
@@ -425,9 +433,16 @@ namespace HS_Reconnector.UI
 
         private void NetworkSave_Click(object sender, RoutedEventArgs e)
         {
-            AppSettings.Instance.NetworkOverlay = ReadNetworkSettings();
+            var snapOverlays = NetworkSnapOverlaysCheck.IsChecked == true;
+            var next = ReadNetworkSettings();
+            AppSettings.Instance.SnapOverlays = snapOverlays;
+            if (!snapOverlays)
+                networkOverlay.DetachFromReconnect(next);
+            AppSettings.Instance.NetworkOverlay = next;
             AppSettings.Save();
             networkOverlay.ApplySettings();
+            if (overlayWindow.IsPreviewActive)
+                RefreshOverlayPreview();
         }
 
         private void OnLanguageChanged()
@@ -472,6 +487,33 @@ namespace HS_Reconnector.UI
         private void OverlayCheck_Changed(object sender, RoutedEventArgs e)
         {
             RefreshOverlayPreview();
+        }
+
+        private void SnapOverlaysCheck_Changed(object sender, RoutedEventArgs e)
+        {
+            if (loadingDraft || !IsInitialized)
+                return;
+
+            var isChecked = sender == NetworkSnapOverlaysCheck
+                ? NetworkSnapOverlaysCheck.IsChecked == true
+                : SnapOverlaysCheck.IsChecked == true;
+
+            loadingDraft = true;
+            try
+            {
+                if (SnapOverlaysCheck.IsChecked != isChecked)
+                    SnapOverlaysCheck.IsChecked = isChecked;
+                if (NetworkSnapOverlaysCheck.IsChecked != isChecked)
+                    NetworkSnapOverlaysCheck.IsChecked = isChecked;
+            }
+            finally
+            {
+                loadingDraft = false;
+            }
+
+            RefreshOverlayPreview();
+            if (networkOverlay.IsPreviewActive)
+                networkOverlay.UpdatePreview(ReadNetworkSettings(), isChecked);
         }
 
         private void RefreshOverlayPreview()
@@ -548,8 +590,14 @@ namespace HS_Reconnector.UI
 
         private void SaveSettingsButton_Click(object sender, RoutedEventArgs e)
         {
-            overlayWindow.StopPreview();
             var s = AppSettings.Instance;
+            var oldMini = s.UseMiniOverlay;
+            var oldScalePercent = s.OverlayScalePercent;
+            overlayWindow.GetEffectivePositionSize(ref oldMini, ref oldScalePercent);
+            s.SnapOverlays = SnapOverlaysCheck.IsChecked == true;
+            if (!s.SnapOverlays)
+                networkOverlay.DetachFromReconnect(s.NetworkOverlay);
+            overlayWindow.StopPreview();
             var previousHotkey = s.Hotkey;
             var previousModifiers = s.HotkeyModifiers;
             var attemptedHotkey = draftHotkey;
@@ -564,9 +612,7 @@ namespace HS_Reconnector.UI
             s.ShowOverlayOnlyWhenGameFocused = OverlayOnlyWhenFocusedCheck.IsChecked == true;
             s.LockOverlayPosition = LockOverlayCheck.IsChecked == true;
             s.OverlayFontWeight = OverlayWeightCombo.SelectedIndex;
-            var oldMini = s.UseMiniOverlay;
             s.UseMiniOverlay = MiniOverlayCheck.IsChecked == true;
-            var oldScalePercent = s.OverlayScalePercent;
             var newScalePercent = (int)Math.Round(ScaleSlider.Value);
             s.OverlayOpacityPercent = (int)Math.Round(OpacitySlider.Value);
             s.OverlayBackgroundOpacityPercent = (int)Math.Round(BgOpacitySlider.Value);
@@ -602,6 +648,7 @@ namespace HS_Reconnector.UI
 
             AppSettings.Save();
             overlayWindow.ApplySettingsAndPosition();
+            networkOverlay.ApplySnapSetting();
             if (languageChanged)
                 Localization.NotifyChanged();
         }
@@ -621,16 +668,19 @@ namespace HS_Reconnector.UI
 
         private AppSettings ReadOverlayPreviewSettings()
         {
-            return new AppSettings
+            var draft = new AppSettings
             {
                 UseMiniOverlay = MiniOverlayCheck.IsChecked == true,
                 LockOverlayPosition = LockOverlayCheck.IsChecked == true,
+                SnapOverlays = SnapOverlaysCheck.IsChecked == true,
                 OverlayFontWeight = OverlayWeightCombo.SelectedIndex,
                 OverlayOpacityPercent = (int)Math.Round(OpacitySlider.Value),
                 OverlayBackgroundOpacityPercent = (int)Math.Round(BgOpacitySlider.Value),
                 OverlayScalePercent = (int)Math.Round(ScaleSlider.Value),
                 ReconnectCooldownSeconds = (int)Math.Round(CooldownSlider.Value)
             };
+            draft.Normalize();
+            return draft;
         }
 
         private void BrowseHsButton_Click(object sender, RoutedEventArgs e)

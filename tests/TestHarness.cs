@@ -340,6 +340,52 @@ class TestHarness
             Check(s.Hotkey == Key.F10 && s.HotkeyModifiers == (HotkeyModifiers.Control | HotkeyModifiers.Alt), "F12 not reset");
         });
 
+        Test("SnapOverlays defaults on, detaches network overlay when disabled, and persists across save/load", () =>
+        {
+            var path = Path.GetTempFileName();
+            var originalSnap = AppSettings.Instance.SnapOverlays;
+            var originalAttached = AppSettings.Instance.NetworkOverlay.AttachedToReconnect;
+            var originalLeft = AppSettings.Instance.NetworkOverlay.Left;
+            var originalTop = AppSettings.Instance.NetworkOverlay.Top;
+            try
+            {
+                var defaults = new AppSettings();
+                Check(defaults.SnapOverlays, "SnapOverlays should default to true");
+
+                defaults.SnapOverlays = false;
+                defaults.NetworkOverlay.AttachedToReconnect = true;
+                defaults.NetworkOverlay.Left = double.NaN;
+                defaults.NetworkOverlay.Top = double.NaN;
+                defaults.Normalize();
+                Check(!defaults.NetworkOverlay.AttachedToReconnect, "Normalize must clear AttachedToReconnect when SnapOverlays is false");
+
+                File.WriteAllText(path, "<AppSettings><OverlayScalePercent>110</OverlayScalePercent></AppSettings>");
+                AppSettings.Load(path);
+                Check(AppSettings.Instance.SnapOverlays, "legacy settings without SnapOverlays should default to true");
+
+                AppSettings.Instance.SnapOverlays = false;
+                AppSettings.Instance.NetworkOverlay.Left = 320;
+                AppSettings.Instance.NetworkOverlay.Top = 240;
+                AppSettings.Instance.NetworkOverlay.AttachedToReconnect = true;
+                AppSettings.Save(path);
+
+                AppSettings.Instance.SnapOverlays = true;
+                AppSettings.Load(path);
+                Check(!AppSettings.Instance.SnapOverlays, "SnapOverlays=false did not persist");
+                Check(!AppSettings.Instance.NetworkOverlay.AttachedToReconnect, "AttachedToReconnect stayed true after loading SnapOverlays=false");
+                Check(AppSettings.Instance.NetworkOverlay.Left == 320 && AppSettings.Instance.NetworkOverlay.Top == 240,
+                    "detached network overlay coordinates were lost");
+            }
+            finally
+            {
+                AppSettings.Instance.SnapOverlays = originalSnap;
+                AppSettings.Instance.NetworkOverlay.AttachedToReconnect = originalAttached;
+                AppSettings.Instance.NetworkOverlay.Left = originalLeft;
+                AppSettings.Instance.NetworkOverlay.Top = originalTop;
+                File.Delete(path);
+            }
+        });
+
         Test("HearthstoneLocator finds newest session log", () =>
         {
             var tempRoot = Path.Combine(Path.GetTempPath(), "hs-loc-" + Guid.NewGuid().ToString("N"));
@@ -525,6 +571,75 @@ class TestHarness
                 Dispatcher.PushFrame(frame);
                 Check(reconnector.Status == ConnectionStatus.Connected
                     && controller.GetSnapshot().VisualState == ReconnectVisualState.Waiting, "match end did not clear cooldown");
+            }
+        });
+
+        Test("controller resets cooldown on stop and isolates stale log watcher startup", () =>
+        {
+            const BindingFlags PrivateInstance = BindingFlags.NonPublic | BindingFlags.Instance;
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            using (var controller = new ReconnectController(dispatcher))
+            {
+                var type = typeof(ReconnectController);
+                var reconnector = (Reconnector)type.GetField("reconnector", PrivateInstance).GetValue(controller);
+                var pending = type.GetField("cooldownPendingAfterReconnect", PrivateInstance);
+                var attemptField = type.GetField("reconnectAttemptId", PrivateInstance);
+                var remoteAddrField = type.GetField("reconnectRemoteAddr", PrivateInstance);
+                var watcherField = type.GetField("logWatcher", PrivateInstance);
+                var startingField = type.GetField("logWatcherStartInProgress", PrivateInstance);
+
+                reconnector.Status = ConnectionStatus.Disconnected;
+                pending.SetValue(controller, true);
+                remoteAddrField.SetValue(controller, "203.0.113.10");
+                type.GetMethod("DisconnectTimer_Tick", PrivateInstance).Invoke(controller, new object[] { null, EventArgs.Empty });
+                Check(controller.GetSnapshot().VisualState == ReconnectVisualState.Cooldown, "expected cooldown before stop reset");
+
+                var attemptBefore = (long)attemptField.GetValue(controller);
+                type.GetMethod("ResetDisconnectAndCooldownState", PrivateInstance).Invoke(controller, null);
+                Check(controller.GetSnapshot().VisualState == ReconnectVisualState.Waiting, "cooldown was not cleared on game stop");
+                Check((long)attemptField.GetValue(controller) > attemptBefore, "reconnectAttemptId was not incremented");
+                Check(remoteAddrField.GetValue(controller) == null, "reconnectRemoteAddr was not cleared");
+
+                var activeWatcher = new LogWatcher(controller, Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".log"));
+                var staleWatcher = new LogWatcher(controller, Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".log"));
+                try
+                {
+                    watcherField.SetValue(controller, activeWatcher);
+                    startingField.SetValue(controller, true);
+                    var startMethod = type.GetMethod("StartLogWatcherAsync", PrivateInstance);
+                    var staleTask = (System.Threading.Tasks.Task)startMethod.Invoke(controller, new object[] { staleWatcher });
+                    staleTask.GetAwaiter().GetResult();
+                    Check((bool)startingField.GetValue(controller), "stale watcher cleared logWatcherStartInProgress for newer watcher");
+                    Check(ReferenceEquals(watcherField.GetValue(controller), activeWatcher), "stale watcher replaced active watcher");
+                }
+                finally
+                {
+                    watcherField.SetValue(controller, null);
+                    activeWatcher.Dispose();
+                    staleWatcher.Dispose();
+                }
+            }
+        });
+
+        Test("NetworkProbe ignores invalid paths and HearthstoneLocator accepts freshly created logs", () =>
+        {
+            Check(NetworkProbe.ReadRegion("bad|path<>Hearthstone.log") == null, "invalid path should return null");
+
+            var tempRoot = Path.Combine(Path.GetTempPath(), "hs-loc-ctime-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var sessionDir = Directory.CreateDirectory(Path.Combine(tempRoot, "Logs", "Hearthstone_fresh"));
+                var logPath = Path.Combine(sessionDir.FullName, "Hearthstone.log");
+                File.WriteAllText(logPath, "fresh");
+                var now = DateTime.UtcNow;
+                File.SetCreationTimeUtc(logPath, now.AddSeconds(2));
+                File.SetLastWriteTimeUtc(logPath, now.AddSeconds(-2));
+                Check(string.Equals(HearthstoneLocator.FindLatestLogFile(tempRoot, now), logPath, StringComparison.OrdinalIgnoreCase),
+                    "freshly created log with lagged LastWriteTimeUtc was rejected");
+            }
+            finally
+            {
+                if (Directory.Exists(tempRoot)) Directory.Delete(tempRoot, true);
             }
         });
 

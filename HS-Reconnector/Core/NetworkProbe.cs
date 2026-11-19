@@ -21,32 +21,43 @@ namespace HS_Reconnector.Core
 
         public static async Task<long?> MeasureAsync(IPAddress address, ushort port)
         {
-            using (var client = new TcpClient(address.AddressFamily))
-            using (var timeout = new CancellationTokenSource())
+            try
             {
-                try
+                using (var client = new TcpClient(address.AddressFamily))
+                using (var timeout = new CancellationTokenSource())
                 {
-                    var stopwatch = Stopwatch.StartNew();
-                    var connect = client.ConnectAsync(address, port);
-                    if (await Task.WhenAny(connect, Task.Delay(1500, timeout.Token)).ConfigureAwait(false) != connect)
+                    try
                     {
-                        // Disposing the socket aborts the outstanding connect. Observe its eventual fault.
-                        _ = connect.ContinueWith(task => { var error = task.Exception; },
-                            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
-                        return null;
-                    }
+                        var stopwatch = Stopwatch.StartNew();
+                        var connect = client.ConnectAsync(address, port);
+                        if (await Task.WhenAny(connect, Task.Delay(1500, timeout.Token)).ConfigureAwait(false) != connect)
+                        {
+                            // Disposing the socket aborts the outstanding connect. Observe its eventual fault.
+                            _ = connect.ContinueWith(task => { var error = task.Exception; },
+                                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+                            return null;
+                        }
 
-                    await connect.ConfigureAwait(false);
-                    return stopwatch.ElapsedMilliseconds;
+                        await connect.ConfigureAwait(false);
+                        return stopwatch.ElapsedMilliseconds;
+                    }
+                    finally
+                    {
+                        timeout.Cancel();
+                    }
                 }
-                catch (SocketException)
-                {
-                    return null;
-                }
-                finally
-                {
-                    timeout.Cancel();
-                }
+            }
+            catch (SocketException)
+            {
+                return null;
+            }
+            catch (ObjectDisposedException)
+            {
+                return null;
+            }
+            catch (InvalidOperationException)
+            {
+                return null;
             }
         }
 
@@ -74,6 +85,8 @@ namespace HS_Reconnector.Core
             }
             catch (IOException) { return null; }
             catch (UnauthorizedAccessException) { return null; }
+            catch (ArgumentException) { return null; }
+            catch (NotSupportedException) { return null; }
         }
 
         private static string NormalizeRegion(string region)
