@@ -34,6 +34,8 @@ namespace HS_Reconnector.LogHandler
         private readonly byte[] tailFingerprint = new byte[TailFingerprintSize];
         private readonly byte[] eventFingerprint = new byte[EventFingerprintSize];
         private readonly byte[] verifyBuffer = new byte[HeadFingerprintSize];
+        private readonly object eventFingerprintLock = new object();
+        private readonly ConnectionLogHandler fallbackLineClassifier = new ConnectionLogHandler();
 
         private int pendingLineLength;
         private long currentLineStartOffset;
@@ -42,6 +44,8 @@ namespace HS_Reconnector.LogHandler
         private long tailFingerprintEndOffset;
         private long eventOffset = -1;
         private int eventFingerprintLength;
+        private bool liveEventRecorded;
+        private int resetGeneration;
         private bool hasFileIdentity;
         private uint baselineVolumeSerial;
         private ulong baselineFileIndex;
@@ -65,6 +69,7 @@ namespace HS_Reconnector.LogHandler
 
         public event Action<string> OnNewLine;
         public event Action OnReset;
+        internal Func<string, bool> LineHandler { get; set; }
 
         public LogReader(string filePath, long initialOffset = 0, long initialEventOffset = -1, byte[] initialEventBytes = null,
             (uint VolumeSerial, ulong FileIndex, long LastWriteTicks)? initialFileIdentity = null)
@@ -93,13 +98,33 @@ namespace HS_Reconnector.LogHandler
             currentLineStartOffset = offset;
             if (initialEventOffset >= 0 && initialEventBytes != null && initialEventBytes.Length > 0)
             {
-                eventOffset = initialEventOffset;
-                eventFingerprintLength = Math.Min(initialEventBytes.Length, EventFingerprintSize);
-                Buffer.BlockCopy(initialEventBytes, 0, eventFingerprint, 0, eventFingerprintLength);
+                lock (eventFingerprintLock)
+                {
+                    eventOffset = initialEventOffset;
+                    eventFingerprintLength = Math.Min(initialEventBytes.Length, EventFingerprintSize);
+                    Buffer.BlockCopy(initialEventBytes, 0, eventFingerprint, 0, eventFingerprintLength);
+                }
             }
 
             threadRead = new Thread(ReadLogFile) { IsBackground = true };
             threadRead.Start();
+        }
+
+        internal bool TrySetBaselineEvent(long candidateOffset, byte[] candidateBytes)
+        {
+            if (candidateOffset < 0 || candidateBytes == null || candidateBytes.Length == 0)
+                return false;
+
+            lock (eventFingerprintLock)
+            {
+                if (liveEventRecorded || resetGeneration != 0 || eventOffset >= 0)
+                    return false;
+
+                eventOffset = candidateOffset;
+                eventFingerprintLength = Math.Min(candidateBytes.Length, EventFingerprintSize);
+                Buffer.BlockCopy(candidateBytes, 0, eventFingerprint, 0, eventFingerprintLength);
+                return true;
+            }
         }
 
         public void RequestStop()
@@ -178,8 +203,13 @@ namespace HS_Reconnector.LogHandler
             headFingerprintLength = 0;
             tailFingerprintLength = 0;
             tailFingerprintEndOffset = 0;
-            eventOffset = -1;
-            eventFingerprintLength = 0;
+            lock (eventFingerprintLock)
+            {
+                eventOffset = -1;
+                eventFingerprintLength = 0;
+                liveEventRecorded = false;
+                resetGeneration++;
+            }
             hasFileIdentity = false;
             baselineVolumeSerial = 0;
             baselineFileIndex = 0;
@@ -298,10 +328,13 @@ namespace HS_Reconnector.LogHandler
                     return false;
             }
 
-            if (eventOffset >= 0 && eventFingerprintLength > 0)
+            lock (eventFingerprintLock)
             {
-                if (fileLength < eventOffset + eventFingerprintLength || !MatchesSlice(fs, eventOffset, eventFingerprint, eventFingerprintLength))
-                    return false;
+                if (eventOffset >= 0 && eventFingerprintLength > 0)
+                {
+                    if (fileLength < eventOffset + eventFingerprintLength || !MatchesSlice(fs, eventOffset, eventFingerprint, eventFingerprintLength))
+                        return false;
+                }
             }
 
             return true;
@@ -499,12 +532,29 @@ namespace HS_Reconnector.LogHandler
             if (length > 0 && (ContainsAsciiMarker(pendingLineBytes, length, EndpointMarkerBytes)
                 || ContainsAsciiMarker(pendingLineBytes, length, DisconnectMarkerBytes)))
             {
-                eventOffset = currentLineStartOffset;
-                eventFingerprintLength = Math.Min(length, EventFingerprintSize);
-                Buffer.BlockCopy(pendingLineBytes, 0, eventFingerprint, 0, eventFingerprintLength);
-
                 var line = Encoding.UTF8.GetString(pendingLineBytes, 0, length);
-                OnNewLine?.Invoke(line);
+                bool tracked;
+                var handler = LineHandler;
+                if (handler != null)
+                {
+                    tracked = handler(line);
+                }
+                else
+                {
+                    tracked = fallbackLineClassifier.IsTrackedEventLine(line);
+                    OnNewLine?.Invoke(line);
+                }
+
+                if (tracked)
+                {
+                    lock (eventFingerprintLock)
+                    {
+                        eventOffset = currentLineStartOffset;
+                        eventFingerprintLength = Math.Min(length, EventFingerprintSize);
+                        Buffer.BlockCopy(pendingLineBytes, 0, eventFingerprint, 0, eventFingerprintLength);
+                        liveEventRecorded = true;
+                    }
+                }
             }
 
             pendingLineLength = 0;

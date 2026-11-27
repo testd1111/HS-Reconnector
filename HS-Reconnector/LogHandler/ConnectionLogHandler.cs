@@ -75,19 +75,32 @@ namespace HS_Reconnector.LogHandler
             ushort.TryParse(endpoint.Substring(lastColon + 1), out port);
         }
 
-        public void Handle(string line, ILogEndpointSink sink)
+        internal bool IsTrackedEventLine(string line)
+        {
+            if (string.IsNullOrEmpty(line))
+                return false;
+
+            return TryExtractEndpoint(line, out _, out _) || IsMatchEndLine(line);
+        }
+
+        public bool Handle(string line, ILogEndpointSink sink)
         {
             if (sink == null || string.IsNullOrEmpty(line))
-                return;
+                return false;
 
             if (TryExtractEndpoint(line, out var host, out var port))
             {
                 sink.SetRemoteEndpoint(host, port, "log");
-                return;
+                return true;
             }
 
             if (IsMatchEndLine(line))
+            {
                 sink.ClearRemoteEndpointForMatchEnd("match ended (EndGameScreen)");
+                return true;
+            }
+
+            return false;
         }
     }
 }

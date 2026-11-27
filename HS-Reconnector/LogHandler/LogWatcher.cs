@@ -22,6 +22,7 @@ namespace HS_Reconnector.LogHandler
         private readonly object callbackLock = new object();
         private readonly object lifecycleLock = new object();
         private int stopped;
+        private int liveEventObserved;
 
         public string LogPath => logPath;
 
@@ -58,7 +59,7 @@ namespace HS_Reconnector.LogHandler
                 logReaders.Clear();
                 foreach (var logReader in readers)
                 {
-                    logReader.OnNewLine -= ConnectionLogReader_OnNewLine;
+                    logReader.LineHandler = null;
                     logReader.OnReset -= ConnectionLogReader_OnReset;
                     logReader.RequestStop();
                 }
@@ -73,16 +74,21 @@ namespace HS_Reconnector.LogHandler
             Stop();
         }
 
-        private void ConnectionLogReader_OnNewLine(string line)
+        private bool ConnectionLogReader_HandleLine(string line)
         {
             lock (callbackLock)
             {
                 if (Volatile.Read(ref stopped) != 0)
-                    return;
+                    return false;
 
                 var sink = endpointSink;
-                if (sink != null)
-                    connectionLogHandler.Handle(line, sink);
+                if (sink == null)
+                    return false;
+
+                var handled = connectionLogHandler.Handle(line, sink);
+                if (handled)
+                    Volatile.Write(ref liveEventObserved, 1);
+                return handled;
             }
         }
 
@@ -93,6 +99,7 @@ namespace HS_Reconnector.LogHandler
                 if (Volatile.Read(ref stopped) != 0)
                     return;
 
+                Volatile.Write(ref liveEventObserved, 1);
                 endpointSink?.ClearRemoteEndpointForMatchEnd("log file truncated or overwritten");
             }
         }
@@ -121,21 +128,30 @@ namespace HS_Reconnector.LogHandler
                     }
                 }
 
+                LogReader reader;
                 lock (lifecycleLock)
                 {
                     if (Volatile.Read(ref stopped) != 0)
                         return false;
 
-                    var reader = new LogReader(
+                    reader = new LogReader(
                         logPath,
                         scanResult.InitialOffset,
                         scanResult.EventOffset,
                         scanResult.EventBytes,
                         scanResult.FileIdentity);
-                    reader.OnNewLine += ConnectionLogReader_OnNewLine;
+                    reader.LineHandler = ConnectionLogReader_HandleLine;
                     reader.OnReset += ConnectionLogReader_OnReset;
                     logReaders.Add(reader);
                     reader.Start();
+                }
+
+                if (!scanResult.HasEndpoint
+                    && !scanResult.FoundMatchEnd
+                    && scanResult.NextHistoricalScanEndOffset > 0
+                    && Volatile.Read(ref stopped) == 0)
+                {
+                    _ = Task.Run(() => ContinueHistoricalScan(scanResult, reader));
                 }
 
                 return Volatile.Read(ref stopped) == 0;
@@ -155,22 +171,111 @@ namespace HS_Reconnector.LogHandler
                 var hasIdentity = Win32.TryGetFileIdentity(stream.SafeFileHandle, out var volumeSerial, out var fileIndex, out var lastWriteTicks);
                 var snapshotLength = stream.Length;
                 var initialOffset = FindTailOffset(stream, snapshotLength);
+                var lowerBound = Math.Max(0, snapshotLength - MaxInitialEndpointScanBytes);
 
-                var hasEndpoint = TryFindLatestEndpointWithEvent(
+                var hasEndpoint = TryFindLatestEndpointInRange(
                     stream,
                     snapshotLength,
+                    lowerBound,
                     connectionLogHandler,
+                    () => Volatile.Read(ref stopped) != 0,
                     out var host,
                     out var port,
                     out var ended,
                     out var eventOffset,
-                    out var eventBytes);
+                    out var eventBytes,
+                    out var nextEndOffset);
 
                 (uint VolumeSerial, ulong FileIndex, long LastWriteTicks)? fileIdentity = null;
                 if (hasIdentity)
                     fileIdentity = (volumeSerial, fileIndex, lastWriteTicks);
 
-                return new InitialScanResult(initialOffset, hasEndpoint && !ended, host, port, eventOffset, eventBytes, fileIdentity);
+                return new InitialScanResult(
+                    initialOffset,
+                    hasEndpoint && !ended,
+                    ended,
+                    host,
+                    port,
+                    eventOffset,
+                    eventBytes,
+                    fileIdentity,
+                    nextEndOffset);
+            }
+        }
+
+        private void ContinueHistoricalScan(InitialScanResult initial, LogReader liveReader)
+        {
+            try
+            {
+                if (Volatile.Read(ref stopped) != 0 || Volatile.Read(ref liveEventObserved) != 0)
+                    return;
+
+                using (var stream = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                {
+                    if (initial.FileIdentity.HasValue)
+                    {
+                        var hasCurrentId = Win32.TryGetFileIdentity(stream.SafeFileHandle, out var volumeSerial, out var fileIndex, out _);
+                        if (!hasCurrentId
+                            || volumeSerial != initial.FileIdentity.Value.VolumeSerial
+                            || fileIndex != initial.FileIdentity.Value.FileIndex)
+                        {
+                            return;
+                        }
+                    }
+
+                    var endOffset = initial.NextHistoricalScanEndOffset;
+                    if (stream.Length < endOffset)
+                        return;
+
+                    while (endOffset > 0
+                        && Volatile.Read(ref stopped) == 0
+                        && Volatile.Read(ref liveEventObserved) == 0)
+                    {
+                        var lowerBound = Math.Max(0, endOffset - MaxInitialEndpointScanBytes);
+                        var found = TryFindLatestEndpointInRange(
+                            stream,
+                            endOffset,
+                            lowerBound,
+                            connectionLogHandler,
+                            () => Volatile.Read(ref stopped) != 0 || Volatile.Read(ref liveEventObserved) != 0,
+                            out var host,
+                            out var port,
+                            out var ended,
+                            out var eventOffset,
+                            out var eventBytes,
+                            out var nextEndOffset);
+
+                        if (Volatile.Read(ref stopped) != 0 || Volatile.Read(ref liveEventObserved) != 0)
+                            return;
+
+                        if (ended)
+                            return;
+
+                        if (found)
+                        {
+                            lock (callbackLock)
+                            {
+                                if (Volatile.Read(ref stopped) != 0 || Volatile.Read(ref liveEventObserved) != 0)
+                                    return;
+
+                                liveReader?.TrySetBaselineEvent(eventOffset, eventBytes);
+                                endpointSink?.SetRemoteEndpoint(host, port, "initial log scan");
+                            }
+                            return;
+                        }
+
+                        if (nextEndOffset >= endOffset)
+                            return;
+
+                        endOffset = nextEndOffset;
+                    }
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Background Hearthstone log scan failed: " + ex.Message);
             }
         }
 
@@ -193,28 +298,34 @@ namespace HS_Reconnector.LogHandler
         {
             public readonly long InitialOffset;
             public readonly bool HasEndpoint;
+            public readonly bool FoundMatchEnd;
             public readonly string Host;
             public readonly ushort Port;
             public readonly long EventOffset;
             public readonly byte[] EventBytes;
             public readonly (uint VolumeSerial, ulong FileIndex, long LastWriteTicks)? FileIdentity;
+            public readonly long NextHistoricalScanEndOffset;
 
             public InitialScanResult(
                 long initialOffset,
                 bool hasEndpoint,
+                bool foundMatchEnd,
                 string host,
                 ushort port,
                 long eventOffset,
                 byte[] eventBytes,
-                (uint VolumeSerial, ulong FileIndex, long LastWriteTicks)? fileIdentity)
+                (uint VolumeSerial, ulong FileIndex, long LastWriteTicks)? fileIdentity,
+                long nextHistoricalScanEndOffset)
             {
                 InitialOffset = initialOffset;
                 HasEndpoint = hasEndpoint;
+                FoundMatchEnd = foundMatchEnd;
                 Host = host;
                 Port = port;
                 EventOffset = eventOffset;
                 EventBytes = eventBytes;
                 FileIdentity = fileIdentity;
+                NextHistoricalScanEndOffset = nextHistoricalScanEndOffset;
             }
         }
 
@@ -257,16 +368,56 @@ namespace HS_Reconnector.LogHandler
             out long eventOffset,
             out byte[] eventBytes)
         {
+            var lowerBound = Math.Max(0, length - MaxInitialEndpointScanBytes);
+            return TryFindLatestEndpointInRange(
+                stream,
+                length,
+                lowerBound,
+                handler,
+                null,
+                out host,
+                out port,
+                out matchEnded,
+                out eventOffset,
+                out eventBytes,
+                out _);
+        }
+
+        internal static bool TryFindLatestEndpointInRange(
+            Stream stream,
+            long endOffset,
+            long lowerBound,
+            ConnectionLogHandler handler,
+            Func<bool> shouldCancel,
+            out string host,
+            out ushort port,
+            out bool matchEnded,
+            out long eventOffset,
+            out byte[] eventBytes,
+            out long nextEndOffset)
+        {
             const int bufferSize = 64 * 1024;
             const int maxLineBytes = 1024 * 1024;
             var buffer = new byte[bufferSize];
             var reversedLine = new List<byte>(256);
             var skipCurrentLine = true;
-            var position = length;
-            var lowerBound = Math.Max(0, length - MaxInitialEndpointScanBytes);
+            var position = endOffset;
+            lowerBound = Math.Max(0, lowerBound);
+            var earliestNewlineOffset = -1L;
 
             while (position > lowerBound)
             {
+                if (shouldCancel != null && shouldCancel())
+                {
+                    host = null;
+                    port = 0;
+                    matchEnded = false;
+                    eventOffset = -1;
+                    eventBytes = null;
+                    nextEndOffset = 0;
+                    return false;
+                }
+
                 var count = (int)Math.Min(buffer.Length, position - lowerBound);
                 position -= count;
                 var read = ReadBlock(stream, position, buffer, count);
@@ -275,9 +426,11 @@ namespace HS_Reconnector.LogHandler
                 {
                     if (buffer[i] == (byte)'\n')
                     {
+                        earliestNewlineOffset = position + i;
                         if (!skipCurrentLine && TryInspectReversedLine(reversedLine, handler, out host, out port, out matchEnded, out eventBytes))
                         {
                             eventOffset = position + i + 1;
+                            nextEndOffset = 0;
                             return !matchEnded;
                         }
 
@@ -303,6 +456,7 @@ namespace HS_Reconnector.LogHandler
                 && TryInspectReversedLine(reversedLine, handler, out host, out port, out matchEnded, out eventBytes))
             {
                 eventOffset = 0;
+                nextEndOffset = 0;
                 return !matchEnded;
             }
 
@@ -311,6 +465,12 @@ namespace HS_Reconnector.LogHandler
             matchEnded = false;
             eventOffset = -1;
             eventBytes = null;
+            if (lowerBound == 0)
+                nextEndOffset = 0;
+            else if (earliestNewlineOffset >= 0 && earliestNewlineOffset + 1 < endOffset)
+                nextEndOffset = earliestNewlineOffset + 1;
+            else
+                nextEndOffset = lowerBound;
             return false;
         }
 

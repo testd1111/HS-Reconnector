@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
@@ -7,6 +8,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using HS_Reconnector.Native;
 
 namespace HS_Reconnector.Core
 {
@@ -63,30 +65,181 @@ namespace HS_Reconnector.Core
 
         public static string ReadRegion(string logPath)
         {
-            if (string.IsNullOrEmpty(logPath))
-                return null;
+            return new RegionLogScanner().Scan(logPath, flushTrailingLine: true);
+        }
 
-            try
+        internal sealed class RegionLogScanner
+        {
+            private const int ReadChunkBytes = 64 * 1024;
+            private const int MaxPendingLineBytes = 64 * 1024;
+            private static readonly byte[] RegionMarkerLower = Encoding.ASCII.GetBytes("region:");
+            private static readonly byte[] LoginMarkerLower = Encoding.ASCII.GetBytes("actual.battle.net");
+
+            private readonly byte[] pendingLineBytes = new byte[MaxPendingLineBytes];
+            private readonly byte[] readBuffer = new byte[ReadChunkBytes];
+            private int pendingLineLength;
+            private string currentPath;
+            private long offset;
+            private bool hasFileIdentity;
+            private uint volumeSerial;
+            private ulong fileIndex;
+            private bool discardUntilLineFeed;
+            private string latestClientRegion;
+            private string latestLoginRegion;
+
+            public void Reset()
             {
-                using (var stream = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-                using (var reader = new BinaryReader(stream))
+                currentPath = null;
+                offset = 0;
+                hasFileIdentity = false;
+                volumeSerial = 0;
+                fileIndex = 0;
+                pendingLineLength = 0;
+                discardUntilLineFeed = false;
+                latestClientRegion = null;
+                latestLoginRegion = null;
+            }
+
+            public string Scan(string logPath, bool flushTrailingLine = false)
+            {
+                if (string.IsNullOrEmpty(logPath))
                 {
-                    var text = Encoding.UTF8.GetString(reader.ReadBytes(256 * 1024));
-                    var clientRegions = ClientRegion.Matches(text);
-                    if (clientRegions.Count > 0)
-                        return NormalizeRegion(clientRegions[clientRegions.Count - 1].Groups["region"].Value);
+                    Reset();
+                    return null;
+                }
 
-                    var matches = LoginAddress.Matches(text);
-                    if (matches.Count == 0)
-                        return null;
+                if (!string.Equals(currentPath, logPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    Reset();
+                    currentPath = logPath;
+                }
 
-                    return NormalizeRegion(matches[matches.Count - 1].Groups["region"].Value);
+                try
+                {
+                    using (var stream = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    {
+                        var fileLength = stream.Length;
+                        var hasCurrentId = Win32.TryGetFileIdentity(
+                            stream.SafeFileHandle,
+                            out var currentVolumeSerial,
+                            out var currentFileIndex,
+                            out _);
+
+                        var identityChanged = hasFileIdentity && hasCurrentId
+                            && (currentVolumeSerial != volumeSerial || currentFileIndex != fileIndex);
+                        if (identityChanged || fileLength < offset)
+                        {
+                            Reset();
+                            currentPath = logPath;
+                        }
+
+                        if (hasCurrentId)
+                        {
+                            hasFileIdentity = true;
+                            volumeSerial = currentVolumeSerial;
+                            fileIndex = currentFileIndex;
+                        }
+
+                        if (offset < fileLength)
+                        {
+                            stream.Seek(offset, SeekOrigin.Begin);
+                            int read;
+                            while ((read = stream.Read(readBuffer, 0, readBuffer.Length)) > 0)
+                            {
+                                offset += read;
+                                ProcessBytes(readBuffer, read);
+                            }
+                        }
+
+                        if (flushTrailingLine && !discardUntilLineFeed && pendingLineLength > 0)
+                            InspectPendingLine();
+
+                        return latestClientRegion ?? latestLoginRegion;
+                    }
+                }
+                catch (IOException) { return latestClientRegion ?? latestLoginRegion; }
+                catch (UnauthorizedAccessException) { return latestClientRegion ?? latestLoginRegion; }
+                catch (ArgumentException) { return null; }
+                catch (NotSupportedException) { return null; }
+            }
+
+            private void ProcessBytes(byte[] buffer, int count)
+            {
+                for (var i = 0; i < count; i++)
+                {
+                    var current = buffer[i];
+                    if (discardUntilLineFeed)
+                    {
+                        if (current == (byte)'\n')
+                            discardUntilLineFeed = false;
+                        continue;
+                    }
+
+                    if (current == (byte)'\n')
+                    {
+                        InspectPendingLine();
+                        continue;
+                    }
+
+                    if (pendingLineLength >= MaxPendingLineBytes)
+                    {
+                        pendingLineLength = 0;
+                        discardUntilLineFeed = true;
+                        continue;
+                    }
+
+                    pendingLineBytes[pendingLineLength++] = current;
                 }
             }
-            catch (IOException) { return null; }
-            catch (UnauthorizedAccessException) { return null; }
-            catch (ArgumentException) { return null; }
-            catch (NotSupportedException) { return null; }
+
+            private void InspectPendingLine()
+            {
+                var length = pendingLineLength;
+                if (length > 0 && pendingLineBytes[length - 1] == (byte)'\r')
+                    length--;
+
+                if (length > 0 && (ContainsAsciiIgnoreCase(pendingLineBytes, length, RegionMarkerLower)
+                    || ContainsAsciiIgnoreCase(pendingLineBytes, length, LoginMarkerLower)))
+                {
+                    var line = Encoding.UTF8.GetString(pendingLineBytes, 0, length);
+                    var clientRegions = ClientRegion.Matches(line);
+                    if (clientRegions.Count > 0)
+                        latestClientRegion = NormalizeRegion(clientRegions[clientRegions.Count - 1].Groups["region"].Value);
+
+                    var loginMatches = LoginAddress.Matches(line);
+                    if (loginMatches.Count > 0)
+                        latestLoginRegion = NormalizeRegion(loginMatches[loginMatches.Count - 1].Groups["region"].Value);
+                }
+
+                pendingLineLength = 0;
+            }
+
+            private static bool ContainsAsciiIgnoreCase(byte[] text, int length, byte[] lowerMarker)
+            {
+                if (length < lowerMarker.Length)
+                    return false;
+
+                var lastStart = length - lowerMarker.Length;
+                for (var start = 0; start <= lastStart; start++)
+                {
+                    var matches = true;
+                    for (var i = 0; i < lowerMarker.Length; i++)
+                    {
+                        var ch = text[start + i];
+                        if (ch >= (byte)'A' && ch <= (byte)'Z')
+                            ch = (byte)(ch + 32);
+                        if (ch == lowerMarker[i])
+                            continue;
+                        matches = false;
+                        break;
+                    }
+
+                    if (matches)
+                        return true;
+                }
+
+                return false;
+            }
         }
 
         private static string NormalizeRegion(string region)

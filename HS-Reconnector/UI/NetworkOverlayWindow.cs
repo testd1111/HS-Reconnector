@@ -35,6 +35,7 @@ namespace HS_Reconnector.UI
         private int simulationPhase;
         private DateTime nextCheck;
         private DateTime nextRegionCheck;
+        private NetworkProbe.RegionLogScanner regionScanner = new NetworkProbe.RegionLogScanner();
         private string region;
         private long? latency;
         private bool checking;
@@ -232,6 +233,7 @@ namespace HS_Reconnector.UI
             history.Clear();
             latency = null;
             region = null;
+            regionScanner = new NetworkProbe.RegionLogScanner();
             nextCheck = DateTime.MinValue;
             nextRegionCheck = DateTime.MinValue;
         }
@@ -286,7 +288,8 @@ namespace HS_Reconnector.UI
                     && DateTime.UtcNow >= nextRegionCheck)
                 {
                     nextRegionCheck = DateTime.UtcNow.AddSeconds(15);
-                    regionTask = Task.Run(() => NetworkProbe.ReadRegion(logPath));
+                    var scanner = regionScanner;
+                    regionTask = Task.Run(() => scanner.Scan(logPath));
                 }
                 var result = await NetworkProbe.MeasureAsync(address, port);
                 var detectedRegion = await regionTask;

@@ -643,6 +643,131 @@ class TestHarness
             }
         });
 
+        Test("watcher finds active match endpoint more than 16 MiB before EOF in background", () =>
+        {
+            var path = Path.GetTempFileName();
+            try
+            {
+                var endpointLine = Encoding.UTF8.GetBytes("Network.GotoGameServe() address=203.0.113.55:1119\n");
+                var fillerLine = Encoding.UTF8.GetBytes(new string('A', 1023) + "\n");
+                using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read))
+                {
+                    fs.Write(endpointLine, 0, endpointLine.Length);
+                    for (var i = 0; i < 17 * 1024; i++) // 17 MiB > MaxInitialEndpointScanBytes (16 MiB)
+                        fs.Write(fillerLine, 0, fillerLine.Length);
+                }
+
+                var sink = new FakeSink();
+                using (var watcher = new LogWatcher(sink, path))
+                {
+                    Check(watcher.StartAsync().GetAwaiter().GetResult(), "watcher failed to start on >16 MiB log");
+                    Check(SpinWait.SpinUntil(() => sink.Address == "203.0.113.55" && sink.Port == 1119, 5000),
+                        "background historical scan did not recover endpoint beyond 16 MiB");
+                }
+
+                // Also verify a line straddling the exact 16 MiB scan boundary is not missed
+                var boundarySize = 16 * 1024 * 1024;
+                var straddlePrefix = Encoding.UTF8.GetBytes("I 00:00:01.0000000 start\n");
+                using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read))
+                {
+                    fs.Write(straddlePrefix, 0, straddlePrefix.Length);
+                    fs.Write(endpointLine, 0, endpointLine.Length);
+                    // Make total length = straddlePrefix + endpointLine/2 + 16 MiB so lowerBound lands inside endpointLine
+                    var targetTail = boundarySize - (endpointLine.Length / 2);
+                    var written = 0;
+                    while (written < targetTail)
+                    {
+                        var chunk = Math.Min(fillerLine.Length, targetTail - written);
+                        if (chunk < fillerLine.Length)
+                        {
+                            var lastLine = Encoding.UTF8.GetBytes(new string('B', Math.Max(0, chunk - 1)) + "\n");
+                            fs.Write(lastLine, 0, lastLine.Length);
+                            written += lastLine.Length;
+                        }
+                        else
+                        {
+                            fs.Write(fillerLine, 0, fillerLine.Length);
+                            written += fillerLine.Length;
+                        }
+                    }
+                }
+
+                var boundarySink = new FakeSink();
+                using (var watcher = new LogWatcher(boundarySink, path))
+                {
+                    Check(watcher.StartAsync().GetAwaiter().GetResult(), "watcher failed on boundary log");
+                    Check(SpinWait.SpinUntil(() => boundarySink.Address == "203.0.113.55" && boundarySink.Port == 1119, 5000),
+                        "endpoint straddling the 16 MiB chunk boundary was missed");
+                }
+            }
+            finally { File.Delete(path); }
+        });
+
+        Test("non-EndGameScreen disconnect does not evict active endpoint fingerprint on growing overwrite", () =>
+        {
+            var path = Path.GetTempFileName();
+            try
+            {
+                var head = new string('H', 600) + "\n";
+                var tail = new string('T', 600) + "\n";
+                var lineA = "Network.GotoGameServe() address=203.0.113.10:1119\n";
+                var lineB = "Network.GotoGameServe() address=203.0.113.20:3724\n";
+                var reconnectDisconnect = "Network.DisconnectFromGameServer() - Reason: Reconnect\n";
+                Check(lineA.Length == lineB.Length, "test endpoint lines must have equal length");
+
+                File.WriteAllText(path, head + lineA + reconnectDisconnect + tail, new UTF8Encoding(false));
+                var sink = new FakeSink();
+                var handler = new ConnectionLogHandler();
+                using (var reader = new LogReader(path))
+                {
+                    var resetCount = 0;
+                    reader.OnReset += () =>
+                    {
+                        resetCount++;
+                        sink.ClearRemoteEndpointForMatchEnd("log reset");
+                    };
+                    reader.LineHandler = line => handler.Handle(line, sink);
+
+                    var readMethod = typeof(LogReader).GetMethod("ReadAvailableLines", BindingFlags.NonPublic | BindingFlags.Instance);
+                    readMethod.Invoke(reader, null);
+                    Check(sink.Address == "203.0.113.10" && sink.Port == 1119, "initial endpoint A not read");
+
+                    // Overwrite address A with address B in-place while preserving head, reconnectDisconnect, tail, and growing the file
+                    File.WriteAllText(path, head + lineB + reconnectDisconnect + tail + "normal_trailing_line\n", new UTF8Encoding(false));
+                    readMethod.Invoke(reader, null);
+                    Check(resetCount == 1, "growing overwrite of active endpoint after non-EndGameScreen disconnect did not trigger reset");
+                    Check(sink.Address == "203.0.113.20" && sink.Port == 3724, "new endpoint B was not picked up after reset");
+                }
+            }
+            finally { File.Delete(path); }
+        });
+
+        Test("NetworkProbe detects region after 256 KiB and scanner continues incrementally across split lines and truncation", () =>
+        {
+            var path = Path.GetTempFileName();
+            try
+            {
+                var filler = new string('x', 1023) + "\n";
+                var sb = new StringBuilder();
+                for (var i = 0; i < 300; i++) // 300 KiB > 256 KiB
+                    sb.Append(filler);
+                File.WriteAllText(path, sb.ToString() + "Region: EU\n", new UTF8Encoding(false));
+                Check(NetworkProbe.ReadRegion(path) == "EU", "ReadRegion missed Region: EU after 256 KiB");
+
+                // Incremental RegionLogScanner across split line and truncation
+                var scanner = new NetworkProbe.RegionLogScanner();
+                File.WriteAllText(path, sb.ToString() + "Regi", new UTF8Encoding(false));
+                Check(scanner.Scan(path) == null, "incomplete region line matched prematurely");
+                File.AppendAllText(path, "on: US\n", new UTF8Encoding(false));
+                Check(scanner.Scan(path) == "US", "scanner did not complete split region line");
+
+                // Truncate file with a different region -> scanner must reset and read from start
+                File.WriteAllText(path, "Region: ASIA\n", new UTF8Encoding(false));
+                Check(scanner.Scan(path) == "ASIA", "scanner did not reset after truncation");
+            }
+            finally { File.Delete(path); }
+        });
+
         Console.WriteLine("Failures: " + failures);
         return failures == 0 ? 0 : 1;
     }
