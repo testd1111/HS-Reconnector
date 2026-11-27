@@ -5,6 +5,8 @@
 A standalone Windows app for reconnecting to your current Hearthstone match with a hotkey or an in-game button.
 
 > Hearthstone Deck Tracker is ending plugin support on November 30, 2026. I made HS-Reconnector a standalone app so reconnecting can keep working independently of HDT. [HearthSim announcement](https://help.hearthsim.net/en/articles/18470784-what-s-changing-about-plugins-in-hdt)
+>
+> **Need to preserve HDT Battlegrounds data across reconnects** (past boards, tavern tiers, triples, plus an optional last-combat indicator)? Use the separate [**HDT-HS-Reconnector**](https://github.com/testd1111/HDT-HS-Reconnector) app. It is kept separate because it uses companion DLLs to hook into HDT.
 
 ![HS-Reconnector in English](docs/screenshots/hs-reconnector-en.png)
 
